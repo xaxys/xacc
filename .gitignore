@@ -1,0 +1,8 @@
+*~
+*.o
+tmp*
+a.out
+xacc
+.vscode
+helloworld.c
+test.sh

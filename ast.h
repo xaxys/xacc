@@ -199,7 +199,8 @@ Expression *NewAddr(Token *op, Expression *exp1);
 Expression *NewAccess(Token *op, Expression *exp1);
 Expression *NewBinop(Token *op, Expression *exp1, Expression *exp2);
 Expression *NewVarref(Token *op, Var *var);
-Expression *NewDeref(Token *op, Var *var);
+Expression *NewDeref(Token *op, Expression *exp1);
+Expression *NewDerefVar(Token *op, Var *var);
 Expression *NewIntExp(int val, Token *op);
 Expression *NewCharExp(char val, Token *op);
 Expression *NewStmtExp(Token *t, Vector *exps);
@@ -224,9 +225,8 @@ struct Statement {
     BB *bb;
 
     // For case, break and continue
-    // Statement *Target;
-    BB *Break_;
-    BB *Continue_;
+    BB *Break;
+    BB *Continue;
 
     // Function definition
     Vector *Params;
@@ -252,7 +252,8 @@ Statement *NewStmt(StmtType ty);
 struct Function {
     char *Name;
     Statement *Stmt;
-    Vector *LeftVars;
+    Vector *Params;
+    Vector *LocalVars;
     Vector *bbs;
 };
 
@@ -263,11 +264,11 @@ struct Program {
 };
 
 struct Reg {
-    int VirtualNumber; // virtual register number
-    int RealNumber; // real register number
+    int vn; // virtual register number
+    int rn; // real register number
 
     // For optimizer
-    Reg *Promoted;
+    Reg *promoted;
 
     // For regalloc
     int def;

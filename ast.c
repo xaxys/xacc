@@ -53,13 +53,26 @@ Expression *NewVarref(Token *op, Var *var) {
     Expression *exp = NewExp(EXP_VARREF, op);
     exp->ctype = var->ty;
     exp->ID = var;
+
+    if (var->ty->ty == ARRAY) {
+        Expression *tmp = NewExp(EXP_ADDR, op);
+        tmp->ctype = PtrTo(var->ty->ArrPtr);
+        tmp->Exp1 = exp;
+        return tmp;
+    }
+
     return exp;
 }
 
-Expression *NewDeref(Token *op, Var *var) {
+Expression *NewDeref(Token *op, Expression *exp1) {
     Expression *exp = NewExp(EXP_DEREF, op);
-    exp->Exp1 = NewVarref(op, var);
+    exp->ctype = exp1->ctype->Ptr;
+    exp->Exp1 = exp1;
     return exp;
+}
+
+Expression *NewDerefVar(Token *op, Var *var) {
+    return NewDeref(op, NewVarref(op, var));
 }
 
 Expression *NewIntExp(int val, Token *op) {

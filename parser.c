@@ -26,7 +26,7 @@ Vector *lvars;
 Vector *breaks;
 Vector *continues;
 Vector *switches;
-int nLabel;
+int nLabel = 1;
 
 // declare forward.
 Statement *parseCompoundStmt(Lexer *lexer);
@@ -128,9 +128,15 @@ Var *addGlobalVar(Program* program, Type *ty, char *name, char *data, int _exter
 Expression *NewStringExp(char *s) {
     Type *ty = ArrayOf(&CharType, strlen(s));
     char *name = format(".L.str%d", nLabel++);
-    Expression *exp = NewExp(EXP_VARREF, NULL);
-    exp->ctype = ty;
-    exp->ID = addGlobalVar(program, ty, name, s, 0);
+    Var *var = addGlobalVar(program, ty, name, s, 0);
+    Expression *exp = NewVarref(NULL, var);
+
+    if (exp->ctype->ty == ARRAY) {
+        Expression *tmp = NewExp(EXP_ADDR, NULL);
+        tmp->ctype = PtrTo(exp->ctype->ArrPtr);
+        tmp->Exp1 = exp;
+        exp = tmp;
+    }
     return exp;
 }
 
@@ -145,10 +151,8 @@ Expression *scalePtr(Expression *exp, Type *ty) {
 Expression *parseLocalVar(Lexer *lexer, Token *token) {
     Var *var = getVar(env, token->Literal);
     if (!var) Error(lexer, token, "Undefined variable");
-    Expression *exp = NewExp(EXP_VARREF, token);
-    exp->ctype = var->ty;
+    Expression *exp = NewVarref(token, var);
     exp->Name = token->Literal;
-    exp->ID = var;
     return exp;
 }
 
@@ -251,15 +255,18 @@ Expression *NewPostIncrease(Token *token, Expression *exp, int imm) {
     Expression *exp1 = NewExp(EXP_ASSIGN, NULL);
     exp1->Exp1 = NewVarref(NULL, var1);
     exp1->Exp2 = NewAddr(NULL, exp);
+    exp1->ctype = exp1->Exp1->ctype;
 
     Expression *exp2 = NewExp(EXP_ASSIGN, NULL);
     exp2->Exp1 = NewVarref(NULL, var2);
-    exp2->Exp2 = NewDeref(NULL, var1);
+    exp2->Exp2 = NewDerefVar(NULL, var1);
+    exp2->ctype = exp2->Exp1->ctype;
 
     Expression *exp3 = NewExp(EXP_ASSIGN, NULL);
-    exp3->Exp1 = NewDeref(NULL, var1);
+    exp3->Exp1 = NewDerefVar(NULL, var1);
     token->Type = TOKEN_OP_ADD;
-    exp3->Exp2 = NewBinop(token, NewDeref(NULL, var1), NewIntExp(imm, NULL));
+    exp3->Exp2 = NewBinop(token, NewDerefVar(NULL, var1), NewIntExp(imm, NULL));
+    exp3->ctype = exp3->Exp1->ctype;
 
     Expression *exp4 = NewVarref(NULL, var2);
 
@@ -297,8 +304,7 @@ Expression *parsePostPrefix(Lexer  *lexer) {
 
         if (token->Type == TOKEN_OP_ARROW) {
             NextToken(lexer);
-            Expression *tmp = NewExp(EXP_DEREF, token);
-            tmp->Exp1 = exp;
+            Expression *tmp = NewDeref(token, exp);
 
             exp = NewAccess(token, tmp);
             exp->Name = ExpectToken(lexer, TOKEN_IDENTIFIER)->Literal;
@@ -309,8 +315,8 @@ Expression *parsePostPrefix(Lexer  *lexer) {
             NextToken(lexer);
             token->Type = TOKEN_OP_ADD;
             Expression *tmp = NewBinop(token, exp, parseAssign(lexer));
-            exp = NewExp(EXP_DEREF, token);
-            exp->Exp1 = tmp;
+            tmp->ctype = tmp->Exp1->ctype;
+            exp = NewDeref(token, tmp);
             ExpectToken(lexer, TOKEN_SEP_RBRACK);
             continue;
         }
@@ -365,8 +371,7 @@ Expression *parseUnary(Lexer *lexer) {
     // *
     if (token->Type == TOKEN_OP_MUL) {
         NextToken(lexer);
-        Expression *exp = NewExp(EXP_DEREF, token);
-        exp->Exp1 = parseUnary(lexer);
+        Expression *exp = NewDeref(token, parseUnary(lexer));
 
         if (exp->Exp1->ctype->ty != PTR) {
             Error(lexer, token, "Operand must be a pointer.");
@@ -578,6 +583,20 @@ Expression *parseRelation(Lexer *lexer) {
         }
         exp->ctype = &IntType;
 
+        // trans great to less
+        if (token->Type == TOKEN_OP_GT ||
+            token->Type == TOKEN_OP_GE) {
+            Expression *tmp = exp->Exp2;
+            exp->Exp2 = exp->Exp1;
+            exp->Exp1 = tmp;
+            switch (token->Type) {
+            case TOKEN_OP_GT:
+                exp->Op->Type = TOKEN_OP_LT; break;
+            case TOKEN_OP_GE:
+                exp->Op->Type = TOKEN_OP_LE; break;
+            }
+        }
+
         token = PeekToken(lexer);
     }
 
@@ -763,15 +782,17 @@ Expression *NewAssignEqual(Token *op, Expression *exp1, Expression *exp2) {
     Var *var = addLocalVar(PtrTo(exp1->ctype), "tmp");
 
     // T *z = &x
-    Expression *tmp1 = NewExp(EXP_ASSIGN, NULL);
-    tmp1->Exp1 = NewVarref(NULL, var);
-    tmp1->Exp2 = NewAddr(NULL, exp1);
+    Expression *tmp1 = NewExp(EXP_ASSIGN, op);
+    tmp1->Exp1 = NewVarref(op, var);
+    tmp1->Exp2 = NewAddr(op, exp1);
+    tmp1->ctype = tmp1->Exp1->ctype;
 
     // *z = *z op y
-    Expression *tmp2 = NewExp(EXP_ASSIGN, NULL);
-    tmp2->Exp1 = NewDeref(NULL, var);
+    Expression *tmp2 = NewExp(EXP_ASSIGN, op);
+    tmp2->Exp1 = NewDerefVar(op, var);
     op->Type = ChangeOpEqual(op->Type);
-    tmp2->Exp2 = NewBinop(op, NewDeref(NULL, var), exp2);
+    tmp2->Exp2 = NewBinop(op, NewDerefVar(op, var), exp2);
+    tmp2->ctype = tmp2->Exp1->ctype;
 
     VectorPush(v, tmp1);
     VectorPush(v, tmp2);
@@ -791,7 +812,10 @@ Expression *parseAssign(Lexer *lexer) {
             Error(lexer, token, "The left side of the operator is not a lvalue.");
         }
 
-        exp = NewBinop(token, exp, parseAssign(lexer));
+        Expression *tmp = NewExp(EXP_ASSIGN, token);
+        tmp->Exp1 = exp;
+        tmp->Exp2 = parseAssign(lexer);
+        exp = tmp;
         exp->ctype = exp->Exp1->ctype;
     } else if (IsOpEqual(token->Type)) {
         NextToken(lexer);
@@ -905,7 +929,7 @@ Type *parseTypename(Lexer *lexer) {
         NextToken(lexer);
         return &CharType;
     default:
-        Error(lexer, token, "unsupported type.");
+        Error(lexer, token, "Unsupported type.");
     }
 }
 
@@ -930,6 +954,7 @@ Statement *parseDeclaration(Lexer *lexer) {
     Expression *exp = NewExp(EXP_ASSIGN, NULL);
     exp->Exp1 = NewVarref(NULL, var);
     exp->Exp2 = decl->Init;
+    exp->ctype = exp->Exp1->ctype;
     decl->Init = NULL;
     Statement *stmt = NewExpStmt(NULL, exp);
     
@@ -1197,7 +1222,8 @@ void parseTopLevel(Lexer *lexer) {
         Function *fn = calloc(1, sizeof(Function));
         fn->Stmt = parseCompoundStmt(lexer);
         fn->Name = ident->Literal;
-        fn->LeftVars = lvars;
+        fn->Params = v;
+        fn->LocalVars = lvars;
         fn->bbs = NewVector();
         VectorPush(program->Functions, fn);
         return;

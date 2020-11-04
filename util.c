@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <string.h>
+#include <stdio.h>
 #include "util.h"
 Vector *NewVector() {
     Vector *v = calloc(1, sizeof(Vector));
@@ -35,6 +37,9 @@ void *VectorPop(Vector *v) {
 }
 
 void *VectorGet(Vector *v, int i) {
+    if (i >= v->len){
+        return -1;
+    }
     assert(i < v->len);
     return v->data[i];
 }

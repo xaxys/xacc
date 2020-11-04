@@ -2,6 +2,11 @@
 #include <stdlib.h>
 #include "lexer.h"
 #include "parser.h"
+#include "generator.h"
+#include "analyzer.h"
+#include "allocator.h"
+#include "gen_x86.h"
+#include "ast.h"
 
 int main(int argc, char *argv[]) {
     if (argc == 2) {
@@ -17,6 +22,11 @@ int main(int argc, char *argv[]) {
 
         Lexer *lexer = NewLexer(argv[1], chunk);
         Program *program = ParseProgram(lexer);
+        genProgram(program);
+        Optimize(program);
+        Analyze(program);
+        Allocate(program);
+        gen_x86(program);
     } else {
         printf("Oops! No input files given.\n");
 		printf("xacc 0.1.0 2020.10.07 Copyright (C) 2020 xaxys.\n");

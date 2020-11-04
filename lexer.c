@@ -35,6 +35,8 @@ Lexer *NewLexer(char *chunkName, char *chunk) {
     lexer->line = 1;
     lexer->pos = lexer->chunk - 1;
     lexer->peekPos = 0;
+
+    lexer->macros = NewMap();
     return lexer;
 }
 
@@ -220,7 +222,7 @@ char *readIdentifier(Lexer *lexer) {
     return tmp;
 }
 
-Token *nextToken(Lexer *lexer) {
+Token *parseToken(Lexer *lexer) {
     char *ch, *ch2, *ch3, *ch4;
 
     // skip whitespace and comment
@@ -461,8 +463,57 @@ Token *nextToken(Lexer *lexer) {
 		return NewTokenWithOrigin(lexer->line, GetTokenType(identifer), identifer, ch);
 	}
     
-    ErrorAt(lexer, ch, "invalid character.");
+    ErrorAt(lexer, ch, "Invalid character.");
     return NewToken(lexer->line, TOKEN_ILLEGAL, ch);
+}
+
+Token *nextToken(Lexer *lexer) {
+    // preprocess
+    Token *token = parseToken(lexer);
+    while (token->Type == TOKEN_PREOP) {
+        token = parseToken(lexer);
+        if (token->Type != TOKEN_IDENTIFIER) {
+            ErrorAt(lexer, token->Original, "Unknown macro.");
+        }
+        if (!strcmp(token->Literal, "include")) {
+            token = parseToken(lexer);
+            if (token->Type != TOKEN_STRING) {
+                ErrorAt(lexer, token->Original, "Unknown include file.");
+            }
+            // ...
+        } else if (!strcmp(token->Literal, "define")) {
+            token = parseToken(lexer);
+            if (token->Type != TOKEN_IDENTIFIER) {
+                ErrorAt(lexer, token->Original, "Unknown macro.");
+            }
+            char *name = token->Literal;
+            token = parseToken(lexer);
+            if (token->Type == TOKEN_CHAR   ||
+                token->Type == TOKEN_NUMBER ||
+                token->Type == TOKEN_STRING ||
+                token->Type == TOKEN_IDENTIFIER) {
+                MapPut(lexer->macros, name, token); 
+                token = parseToken(lexer);
+            } else {
+                MapPut(lexer->macros, name, NULL);
+            }
+        }
+    }
+    if (token->Type == TOKEN_IDENTIFIER) {
+        for (int i = 0; i < VectorSize(lexer->macros->keys); i++) {
+            char *key = VectorGet(lexer->macros->keys, i);
+            if (!strcmp(token->Literal, key)) {
+                Token *t = VectorGet(lexer->macros->vals, i);
+                if (t == NULL) {
+                    ErrorAt(lexer, token->Original, "Uninitialized macro.");
+                }
+                token->Type = t->Type;
+                token->Literal = t->Literal;
+                break;
+            }
+        }
+    }
+    return token;
 }
 
 Token *PeekToken(Lexer *lexer) {
@@ -492,7 +543,7 @@ Token *ConsumeToken(Lexer *lexer, TokenType type) {
     }
 }
 
-static Token *ExpectToken(Lexer *lexer, TokenType type) {
+Token *expectToken(Lexer *lexer, TokenType type) {
     Token *token = ConsumeToken(lexer, type);
     if (token == NULL) {
         ErrorAt(lexer, PeekToken(lexer)->Original, "unexpected symbol.");

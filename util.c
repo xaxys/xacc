@@ -37,9 +37,6 @@ void *VectorPop(Vector *v) {
 }
 
 void *VectorGet(Vector *v, int i) {
-    if (i >= v->len){
-        return -1;
-    }
     assert(i < v->len);
     return v->data[i];
 }

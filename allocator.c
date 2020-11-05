@@ -24,8 +24,7 @@
 void three_to_two(BB *bb) {
     Vector *v = NewVector();
 
-    for (int i = 0; i < bb->ir->len; i++)
-    {
+    for (int i = 0; i < bb->ir->len; i++) {
         IR *ir = bb->ir->data[i];
 
         if (!ir->r0 || !ir->r1)
@@ -57,22 +56,18 @@ static Vector *collect_regs(Function *fn) {
     Vector *v = NewVector();
     int ic = 1; // instruction counter
 
-    for (int i = 0; i < fn->bbs->len; i++)
-    {
+    for (int i = 0; i < fn->bbs->len; i++) {
         BB *bb = fn->bbs->data[i];
 
-        if (bb->param)
-        {
+        if (bb->param) {
             bb->param->def = ic;
             VectorPush(v, bb->param);
         }
 
-        for (int i = 0; i < bb->ir->len; i++, ic++)
-        {
+        for (int i = 0; i < bb->ir->len; i++, ic++) {
             IR *ir = bb->ir->data[i];
 
-            if (ir->r0 && !ir->r0->def)
-            {
+            if (ir->r0 && !ir->r0->def) {
                 ir->r0->def = ic;
                 VectorPush(v, ir->r0);
             }
@@ -81,13 +76,14 @@ static Vector *collect_regs(Function *fn) {
             set_last_use(ir->r2, ic);
             set_last_use(ir->bbarg, ic);
 
-            if (ir->op == IR_CALL)
-                for (int i = 0; i < ir->nargs; i++)
+            if (ir->op == IR_CALL) {
+                for (int i = 0; i < ir->nargs; i++) {
                     set_last_use(ir->args[i], ic);
+                }
+            }
         }
 
-        for (int i = 0; i < bb->out_regs->len; i++)
-        {
+        for (int i = 0; i < bb->out_regs->len; i++) {
             Reg *r = bb->out_regs->data[i];
             set_last_use(r, ic);
         }
@@ -96,38 +92,38 @@ static Vector *collect_regs(Function *fn) {
     return v;
 }
 
-static int choose_to_spill(Reg **used)
-{
+static int choose_to_spill(Reg **used) {
     int k = 0;
-    for (int i = 1; i < num_regs; i++)
-        if (used[k]->last_use < used[i]->last_use)
+    for (int i = 1; i < num_regs; i++) {
+        if (used[k]->last_use < used[i]->last_use) {
             k = i;
+        }
+    }
     return k;
 }
 
 // Allocate registers.
-static void scan(Vector *regs)
-{
+static void scan(Vector *regs) {
     Reg **used = calloc(num_regs, sizeof(Reg *));
 
-    for (int i = 0; i < regs->len; i++)
-    {
+    for (int i = 0; i < regs->len; i++) {
         Reg *r = regs->data[i];
 
         // Find an unused slot.
         int found = 0;
-        for (int i = 0; i < num_regs - 1; i++)
-        {
-            if (used[i] && r->def < used[i]->last_use)
+        for (int i = 0; i < num_regs - 1; i++) {
+            if (used[i] && r->def < used[i]->last_use) {
                 continue;
+            }
             r->rn = i;
             used[i] = r;
             found = 1;
             break;
         }
 
-        if (found)
+        if (found) {
             continue;
+        }
 
         // Choose a register to spill and mark it as "spilled".
         used[num_regs - 1] = r;
@@ -140,11 +136,11 @@ static void scan(Vector *regs)
     }
 }
 
-static void spill_store(Vector *v, IR *ir)
-{
+static void spill_store(Vector *v, IR *ir) {
     Reg *r = ir->r0;
-    if (!r || !r->spill)
+    if (!r || !r->spill) {
         return;
+    }
 
     IR *ir2 = calloc(1, sizeof(IR));
     ir2->op = IR_STORE_SPILL;
@@ -153,10 +149,10 @@ static void spill_store(Vector *v, IR *ir)
     VectorPush(v, ir2);
 }
 
-static void spill_load(Vector *v, IR *ir, Reg *r)
-{
-    if (!r || !r->spill)
+static void spill_load(Vector *v, IR *ir, Reg *r) {
+    if (!r || !r->spill) {
         return;
+    }
 
     IR *ir2 = calloc(1, sizeof(IR));
     ir2->op = IR_LOAD_SPILL;
@@ -165,12 +161,10 @@ static void spill_load(Vector *v, IR *ir, Reg *r)
     VectorPush(v, ir2);
 }
 
-static void emit_spill_code(BB *bb)
-{
+static void emit_spill_code(BB *bb) {
     Vector *v = NewVector();
 
-    for (int i = 0; i < bb->ir->len; i++)
-    {
+    for (int i = 0; i < bb->ir->len; i++) {
         IR *ir = bb->ir->data[i];
 
         spill_load(v, ir, ir->r1);
@@ -183,13 +177,11 @@ static void emit_spill_code(BB *bb)
 }
 
 void Allocate(Program *prog) {
-    for (int i = 0; i < prog->Functions->len; i++)
-    {
+    for (int i = 0; i < prog->Functions->len; i++) {
         Function *fn = prog->Functions->data[i];
 
         // Convert SSA to x86-ish two-address form.
-        for (int i = 0; i < fn->bbs->len; i++)
-        {
+        for (int i = 0; i < fn->bbs->len; i++) {
             BB *bb = fn->bbs->data[i];
             three_to_two(bb);
         }
@@ -199,8 +191,7 @@ void Allocate(Program *prog) {
         scan(regs);
 
         // Reserve a stack area for spilled registers.
-        for (int i = 0; i < regs->len; i++)
-        {
+        for (int i = 0; i < regs->len; i++) {
             Reg *r = regs->data[i];
             if (!r->spill)
                 continue;
@@ -215,8 +206,7 @@ void Allocate(Program *prog) {
         }
 
         // Convert accesses to spilled registers to loads and stores.
-        for (int i = 0; i < fn->bbs->len; i++)
-        {
+        for (int i = 0; i < fn->bbs->len; i++) {
             BB *bb = fn->bbs->data[i];
             emit_spill_code(bb);
         }

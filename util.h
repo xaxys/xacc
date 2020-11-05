@@ -28,6 +28,18 @@ void MapPutInt(Map *map, char *key, int val);
 void *MapGet(Map *map, char *key);
 int MapGetInt(Map *map, char *key, int _default);
 
-char *format(char *fmt, ...);
+typedef struct {
+    char *data;
+    int   capacity;
+    int   len;
+} StringBuilder;
+
+StringBuilder *NewStringBuilder();
+void StringBuilderAdd(StringBuilder *sb, char c);
+void StringBuilderAppend(StringBuilder *sb, char *s);
+void StringBuilderAppendN(StringBuilder *sb, char *s, int len);
+char *StringBuilderToString(StringBuilder *sb);
+
+char *Format(char *fmt, ...);
 
 #endif

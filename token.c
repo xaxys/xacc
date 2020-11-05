@@ -275,7 +275,12 @@ TokenType ChangeOpEqual(TokenType ty) {
         return TOKEN_OP_SHR;
     case TOKEN_OP_SHLEQ:
         return TOKEN_OP_SHL;
+    case TOKEN_OP_ADDSELF:
+        return TOKEN_OP_ADD;
+    case TOKEN_OP_SUBSELF:
+        return TOKEN_OP_SUB;
     }
+    return ty;
 }
 
 int IsOpEqual(TokenType ty) {

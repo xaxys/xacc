@@ -1,8 +1,11 @@
 *~
 *.o
+*.s
 tmp*
 a.out
+a
 xacc
 .vscode
 helloworld.c
+irdump.*
 test.sh

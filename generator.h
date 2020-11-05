@@ -6,7 +6,7 @@
 #include "ir.h"
 
 extern int nLabel;
-void genProgram(Program *program);
+void GenProgram(Program *program);
 void Optimize(Program *program);
 
 #endif

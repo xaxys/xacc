@@ -42,7 +42,7 @@ static void ErrorAt(Lexer *lexer, char *loc, char *fmt, ...) {
     char *start = loc, *end = loc;
     while (start > lexer->chunk && *(start - 1) != '\n') start--;
     while (*end != '\0' && *end != '\n') end++;
-    *end = '\0';
+    if (*end != '\0') *end = '\0';
     int pos = loc - start;
 
     fprintf(stderr, "Syntax Error:\n");
@@ -126,15 +126,14 @@ Var *addGlobalVar(Program* program, Type *ty, char *name, char *data, int _exter
 }
 
 Expression *NewStringExp(char *s) {
-    Type *ty = ArrayOf(&CharType, strlen(s));
-    char *name = format(".L.str%d", nLabel++);
+    Type *ty = ArrayOf(&CharType, strlen(s)+1);
+    char *name = Format(".L.str%d", nLabel++);
     Var *var = addGlobalVar(program, ty, name, s, 0);
     Expression *exp = NewVarref(NULL, var);
 
     if (exp->ctype->ty == ARRAY) {
-        Expression *tmp = NewExp(EXP_ADDR, NULL);
+        Expression *tmp = NewAddr(NULL, exp);
         tmp->ctype = PtrTo(exp->ctype->ArrPtr);
-        tmp->Exp1 = exp;
         exp = tmp;
     }
     return exp;
@@ -150,7 +149,7 @@ Expression *scalePtr(Expression *exp, Type *ty) {
 
 Expression *parseLocalVar(Lexer *lexer, Token *token) {
     Var *var = getVar(env, token->Literal);
-    if (!var) Error(lexer, token, "Undefined variable");
+    if (!var) Error(lexer, token, "undefined variable");
     Expression *exp = NewVarref(token, var);
     exp->Name = token->Literal;
     return exp;
@@ -167,7 +166,7 @@ Expression *parseFuncCall(Lexer *lexer, Token *token) {
     if (var && var->ty->ty == FUNC) {
         exp->ctype = var->ty;
     } else {
-        Error(lexer, token, "Undefined function");
+        Error(lexer, token, "undefined function");
         exp->ctype = NewFuncType(&IntType);
     }
 
@@ -241,34 +240,34 @@ Expression *parsePrimary(Lexer *lexer) {
         return parseLocalVar(lexer, token);
     }
  
-    Error(lexer, token, "Primary expression expected.");
+    Error(lexer, token, "primary expression expected.");
 }
 
 // `x++` where x is of type T is compiled as
-// `({ T *y = &x; T z = *y; *y = *y + 1; *z; })`.
+// `({ T *y = &x; T z = *y; *y = *y + 1; z; })`.
 Expression *NewPostIncrease(Token *token, Expression *exp, int imm) {
     Vector *v = NewVector();
 
-    Var *var1 = addLocalVar(PtrTo(exp->ctype), "tmp");
-    Var *var2 = addLocalVar(exp->ctype, "tmp");
+    Var *var1 = addLocalVar(PtrTo(exp->ctype), "tmp1");
+    Var *var2 = addLocalVar(exp->ctype, "tmp2");
 
-    Expression *exp1 = NewExp(EXP_ASSIGN, NULL);
-    exp1->Exp1 = NewVarref(NULL, var1);
-    exp1->Exp2 = NewAddr(NULL, exp);
+    Expression *exp1 = NewExp(EXP_ASSIGN, token);
+    exp1->Exp1 = NewVarref(token, var1);
+    exp1->Exp2 = NewAddr(token, exp);
     exp1->ctype = exp1->Exp1->ctype;
 
-    Expression *exp2 = NewExp(EXP_ASSIGN, NULL);
-    exp2->Exp1 = NewVarref(NULL, var2);
-    exp2->Exp2 = NewDerefVar(NULL, var1);
+    Expression *exp2 = NewExp(EXP_ASSIGN, token);
+    exp2->Exp1 = NewVarref(token, var2);
+    exp2->Exp2 = NewDerefVar(token, var1);
     exp2->ctype = exp2->Exp1->ctype;
 
-    Expression *exp3 = NewExp(EXP_ASSIGN, NULL);
-    exp3->Exp1 = NewDerefVar(NULL, var1);
+    Expression *exp3 = NewExp(EXP_ASSIGN, token);
+    exp3->Exp1 = NewDerefVar(token, var1);
     token->Type = TOKEN_OP_ADD;
-    exp3->Exp2 = NewBinop(token, NewDerefVar(NULL, var1), NewIntExp(imm, NULL));
+    exp3->Exp2 = NewBinop(token, NewDerefVar(token, var1), NewIntExp(imm, token));
     exp3->ctype = exp3->Exp1->ctype;
 
-    Expression *exp4 = NewVarref(NULL, var2);
+    Expression *exp4 = NewVarref(token, var2);
 
     VectorPush(v, exp1);
     VectorPush(v, exp2);
@@ -279,7 +278,7 @@ Expression *NewPostIncrease(Token *token, Expression *exp, int imm) {
 }
 
 Expression *parsePostPrefix(Lexer  *lexer) {
-    // 1 ++, --
+    // 1 x++, x--
     Expression *exp = parsePrimary(lexer);
     for (;;) {
         Token *token = PeekToken(lexer);
@@ -314,7 +313,8 @@ Expression *parsePostPrefix(Lexer  *lexer) {
         if (token->Type == TOKEN_SEP_LBRACK) {
             NextToken(lexer);
             token->Type = TOKEN_OP_ADD;
-            Expression *tmp = NewBinop(token, exp, parseAssign(lexer));
+            Expression *idx = scalePtr(parseAssign(lexer), exp->ctype);
+            Expression *tmp = NewBinop(token, exp, idx);
             tmp->ctype = tmp->Exp1->ctype;
             exp = NewDeref(token, tmp);
             ExpectToken(lexer, TOKEN_SEP_RBRACK);
@@ -326,7 +326,7 @@ Expression *parsePostPrefix(Lexer  *lexer) {
 }
 
 Expression *parseUnary(Lexer *lexer) {
-    // 2 -, !, ~, *, &, ++, --
+    // 2 -, !, ~, *, &, ++x, --x
     Token *token = PeekToken(lexer);
     // -
     if (token->Type == TOKEN_OP_SUB) {
@@ -339,7 +339,7 @@ Expression *parseUnary(Lexer *lexer) {
         } else {
             exp = NewBinop(token, NewIntExp(0, NULL), exp);
             if (!IsNumType(exp->Exp2->ctype)) {
-                Error(lexer, token, "The right side of the operator is not a number.");
+                Error(lexer, token, "the right side of the operator is not a number.");
             }
             exp->ctype = &IntType;
         }
@@ -362,7 +362,7 @@ Expression *parseUnary(Lexer *lexer) {
         } else {
             exp = NewUnop(token, exp);
             if (!IsNumType(exp->Exp1->ctype)) {
-                Error(lexer, token, "The right side of the operator is not a number.");
+                Error(lexer, token, "the right side of the operator is not a number.");
             }
             exp->ctype = &IntType;
         }
@@ -374,11 +374,11 @@ Expression *parseUnary(Lexer *lexer) {
         Expression *exp = NewDeref(token, parseUnary(lexer));
 
         if (exp->Exp1->ctype->ty != PTR) {
-            Error(lexer, token, "Operand must be a pointer.");
+            Error(lexer, token, "operand must be a pointer.");
         }
 
         if (exp->Exp1->ctype->Ptr->ty == VOID) {
-            Error(lexer, token, "Cannot dereference void pointer.");
+            Error(lexer, token, "cannot dereference void pointer.");
         }
         exp->ctype = exp->Exp1->ctype->Ptr;
 
@@ -387,11 +387,10 @@ Expression *parseUnary(Lexer *lexer) {
     // &
     if (token->Type == TOKEN_OP_BAND) {
         NextToken(lexer);
-        Expression *exp = NewExp(EXP_ADDR, token);
-        exp->Exp1 = parseUnary(lexer);
+        Expression *exp = NewAddr(token, parseUnary(lexer));
 
         if (!IsLvalExp(exp->Exp1)) {
-            Error(lexer, token, "Operand must be a lvalue expression.");
+            Error(lexer, token, "operand must be a lvalue expression.");
         }
         exp->ctype = PtrTo(exp->Exp1->ctype);
         if (exp->Exp1->ty == EXP_VARREF) {
@@ -403,14 +402,12 @@ Expression *parseUnary(Lexer *lexer) {
     // ++
     if (token->Type == TOKEN_OP_ADDSELF) {
         NextToken(lexer);
-        token->Type = TOKEN_OP_ADD;
-        return NewAssignEqual(token, parseUnary(lexer), NewIntExp(1, NULL));
+        return NewAssignEqual(token, parseUnary(lexer), NewIntExp(1, token));
     }
     // --
     if (token->Type == TOKEN_OP_SUBSELF) {
         NextToken(lexer);
-        token->Type = TOKEN_OP_SUB;
-        return NewAssignEqual(token, parseUnary(lexer), NewIntExp(1, NULL));
+        return NewAssignEqual(token, parseUnary(lexer), NewIntExp(1, token));
     }
 
     return parsePostPrefix(lexer);
@@ -444,10 +441,10 @@ Expression *parseMulDivMod(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "The right side of the operator is not a number.");
+            Error(lexer, token, "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
@@ -492,7 +489,7 @@ Expression *parseAddSub(Lexer *lexer) {
 
             if (!IsNumType(exp->Exp2->ctype)) {
                 ErrorAt(lexer, token->Original,
-                      "The %s side of the operator is not a number.",
+                      "the %s side of the operator is not a number.",
                       swaped ? "left" : "right");
             }
 
@@ -509,7 +506,7 @@ Expression *parseAddSub(Lexer *lexer) {
             if (exp->Exp1->ctype->ty == PTR &&
                 exp->Exp2->ctype->ty == PTR) {
                 if (!IsSameType(exp->Exp1->ctype, exp->Exp2->ctype)) {
-                    Error(lexer, token, "Incompatible pointer.");
+                    Error(lexer, token, "incompatible pointer.");
                 } else {
                     exp = scalePtr(exp, exp->Exp1->ctype);
                     exp->ctype = exp->Exp1->ctype;
@@ -549,10 +546,10 @@ Expression *parseShift(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "The right side of the operator is not a number.");
+            Error(lexer, token, "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
@@ -576,10 +573,10 @@ Expression *parseRelation(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "The right side of the operator is not a number.");
+            Error(lexer, token, "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
@@ -614,10 +611,10 @@ Expression *parseEqual(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "The right side of the operator is not a number.");
+            Error(lexer, token, "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
@@ -637,10 +634,10 @@ Expression *parseBitAnd(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "The right side of the operator is not a number.");
+            Error(lexer, token, "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
@@ -660,10 +657,10 @@ Expression *parseBitXOr(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "The right side of the operator is not a number.");
+            Error(lexer, token, "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
@@ -683,10 +680,10 @@ Expression *parseBitOr(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "The right side of the operator is not a number.");
+            Error(lexer, token, "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
@@ -708,7 +705,7 @@ Expression *parseLogicalAnd(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         expList->ctype = &IntType;
 
@@ -717,7 +714,7 @@ Expression *parseLogicalAnd(Lexer *lexer) {
 
             // check type
             if (!IsNumType(exp->ctype)) {
-                Error(lexer, token, "The right side of the operator is not a number.");
+                Error(lexer, token, "the right side of the operator is not a number.");
             }
 
             VectorPush(expList->Exps, exp);
@@ -738,7 +735,7 @@ Expression *parseLogicalOr(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp1->ctype)) {
-            Error(lexer, token, "The left side of the operator is not a number.");
+            Error(lexer, token, "the left side of the operator is not a number.");
         }
         expList->ctype = &IntType;
 
@@ -747,7 +744,7 @@ Expression *parseLogicalOr(Lexer *lexer) {
 
             // check type
             if (!IsNumType(exp->ctype)) {
-                Error(lexer, token, "The right side of the operator is not a number.");
+                Error(lexer, token, "the right side of the operator is not a number.");
             }
 
             VectorPush(expList->Exps, exp);
@@ -809,7 +806,7 @@ Expression *parseAssign(Lexer *lexer) {
 
         // check type
         if (!IsLvalExp(exp)) {
-            Error(lexer, token, "The left side of the operator is not a lvalue.");
+            Error(lexer, token, "the left side of the operator is not a lvalue.");
         }
 
         Expression *tmp = NewExp(EXP_ASSIGN, token);
@@ -822,7 +819,7 @@ Expression *parseAssign(Lexer *lexer) {
 
         // check type
         if (!IsLvalExp(exp)) {
-            Error(lexer, token, "The left side of the operator is not a lvalue.");
+            Error(lexer, token, "the left side of the operator is not a lvalue.");
         }
 
         Type *ty = exp->ctype;
@@ -929,7 +926,7 @@ Type *parseTypename(Lexer *lexer) {
         NextToken(lexer);
         return &CharType;
     default:
-        Error(lexer, token, "Unsupported type.");
+        Error(lexer, token, "unsupported type.");
     }
 }
 

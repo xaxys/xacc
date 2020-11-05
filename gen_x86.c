@@ -2,6 +2,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <ctype.h>
 
 // This pass generates x86-64 assembly from IR.
 
@@ -191,13 +193,13 @@ void emit_code(Function *fn) {
   for (int i = 0; i < fn->LocalVars->len; i++) {
     Var *var = fn->LocalVars->data[i];
     off += var->ty->Size;
-    // off = roundup(off, var->ty->align);
-    off = roundup(off, var->ty->Size);
+    off = roundup(off, var->ty->Align);
+    // off = roundup(off, var->ty->Size);
     var->offset = -off;
   }
 
   // Emit assembly
-  char *ret = format(".Lend%d", nLabel++);
+  char *ret = Format(".Lend%d", nLabel++);
 
   p(".text");
   p(".global %s", fn->Name);
@@ -210,11 +212,11 @@ void emit_code(Function *fn) {
   emit("push r14");
   emit("push r15");
 
-  for (int i = 0; i < fn->bbs->len; i++) {
-    BB *bb = fn->bbs->data[i];
+  for (int i = 0; i < VectorSize(fn->bbs); i++) {
+    BB *bb = VectorGet(fn->bbs, i);
     p(".L%d:", bb->label);
-    for (int i = 0; i < bb->ir->len; i++) {
-      IR *ir = bb->ir->data[i];
+    for (int i = 0; i < VectorSize(bb->ir); i++) {
+      IR *ir = VectorGet(bb->ir, i);
       emit_ir(ir, ret);
     }
   }
@@ -229,34 +231,33 @@ void emit_code(Function *fn) {
   emit("ret");
 }
 
-// static char *backslash_escape(char *s, int len) {
-//   static char escaped[256] = {
-//           ['\b'] = 'b', ['\f'] = 'f',  ['\n'] = 'n',  ['\r'] = 'r',
-//           ['\t'] = 't', ['\\'] = '\\', ['\''] = '\'', ['"'] = '"',
-//   };
+static char *backslash_escape(char *s, int len) {
+  static char escaped[256] = {
+          ['\b'] = 'b', ['\f'] = 'f',  ['\n'] = 'n',  ['\r'] = 'r',
+          ['\t'] = 't', ['\\'] = '\\', ['\''] = '\'', ['"'] = '"',
+  };
 
-//   StringBuilder *sb = new_sb();
-//   for (int i = 0; i < len; i++) {
-//     uint8_t c = s[i];
-//     char esc = escaped[c];
-//     if (esc) {
-//       sb_add(sb, '\\');
-//       sb_add(sb, esc);
-//     } else if (isgraph(c) || c == ' ') {
-//       sb_add(sb, c);
-//     } else {
-//       sb_append(sb, format("\\%03o", c));
-//     }
-//   }
-//   return sb_get(sb);
-// }
+  StringBuilder *sb = NewStringBuilder();
+  for (int i = 0; i < len; i++) {
+    char c = s[i];
+    char esc = escaped[c];
+    if (esc) {
+      StringBuilderAdd(sb, '\\');
+      StringBuilderAdd(sb, esc);
+    } else if (isgraph(c) || c == ' ') {
+      StringBuilderAdd(sb, c);
+    } else {
+      StringBuilderAppend(sb, Format("\\%03o", c));
+    }
+  }
+  return StringBuilderToString(sb);
+}
 
 static void emit_data(Var *var) {
   if (var->data) {
     p(".data");
     p("%s:", var->Name);
-    // emit(".ascii \"%s\"", backslash_escape(var->data, var->ty->Size));
-    emit(".ascii \"%s\"", var->data);
+    emit(".ascii \"%s\"", backslash_escape(var->data, var->ty->Size));
     return;
   }
 
@@ -268,9 +269,9 @@ static void emit_data(Var *var) {
 void gen_x86(Program *prog) {
   p(".intel_syntax noprefix");
 
-  for (int i = 0; i < prog->GlobalVars->len; i++)
-    emit_data(prog->GlobalVars->data[i]);
+  for (int i = 0; i < VectorSize(prog->GlobalVars); i++)
+    emit_data(VectorGet(prog->GlobalVars, i));
 
   for (int i = 0; i < prog->Functions->len; i++)
-    emit_code(prog->Functions->data[i]);
+    emit_code(VectorGet(prog->Functions, i));
 }

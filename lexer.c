@@ -218,7 +218,7 @@ char *readIdentifier(Lexer *lexer) {
     // copy number string
     char *tmp = malloc(ch - startPos + 1);
     memcpy(tmp, startPos, ch - startPos);
-    *(tmp + (ch - startPos + 1)) = '\0';
+    tmp[ch - startPos + 1] = '\0';
     return tmp;
 }
 
@@ -231,23 +231,13 @@ Token *parseToken(Lexer *lexer) {
         ch = peekChar(lexer);
         if (ch == NULL) break;
         switch (*ch) {
-        case ' ':
-            readChar(lexer);
-            break;
-        case '\t':
-            readChar(lexer);
-            break;
-        case '\r':
-            readChar(lexer);
-            break;
-        case '\f':
-            readChar(lexer);
-            break;
-        case '\v':
-            readChar(lexer);
-            break;
         case '\n':
             lexer->line++;
+        case ' ':
+        case '\t':
+        case '\r':
+        case '\f':
+        case '\v':
             readChar(lexer);
             break;
         case '/':
@@ -282,7 +272,7 @@ Token *parseToken(Lexer *lexer) {
 
     // tokenize
     ch = peekChar(lexer);
-    if (ch == NULL || *ch == '\0') return NewToken(lexer->line, TOKEN_EOF, "<end-of-file>");
+    if (ch == NULL || *ch == '\0') return NewToken(lexer->line, TOKEN_EOF, "<EOF>");
 
     switch (*ch) {
 	// case '\n': // peek: \n
@@ -463,7 +453,7 @@ Token *parseToken(Lexer *lexer) {
 		return NewTokenWithOrigin(lexer->line, GetTokenType(identifer), identifer, ch);
 	}
     
-    ErrorAt(lexer, ch, "Invalid character.");
+    ErrorAt(lexer, ch, "invalid character.");
     return NewToken(lexer->line, TOKEN_ILLEGAL, ch);
 }
 
@@ -473,18 +463,18 @@ Token *nextToken(Lexer *lexer) {
     while (token->Type == TOKEN_PREOP) {
         token = parseToken(lexer);
         if (token->Type != TOKEN_IDENTIFIER) {
-            ErrorAt(lexer, token->Original, "Unknown macro.");
+            ErrorAt(lexer, token->Original, "unknown macro.");
         }
         if (!strcmp(token->Literal, "include")) {
             token = parseToken(lexer);
             if (token->Type != TOKEN_STRING) {
-                ErrorAt(lexer, token->Original, "Unknown include file.");
+                ErrorAt(lexer, token->Original, "unknown include file.");
             }
             // ...
         } else if (!strcmp(token->Literal, "define")) {
             token = parseToken(lexer);
             if (token->Type != TOKEN_IDENTIFIER) {
-                ErrorAt(lexer, token->Original, "Unknown macro.");
+                ErrorAt(lexer, token->Original, "unknown macro.");
             }
             char *name = token->Literal;
             token = parseToken(lexer);
@@ -505,7 +495,7 @@ Token *nextToken(Lexer *lexer) {
             if (!strcmp(token->Literal, key)) {
                 Token *t = VectorGet(lexer->macros->vals, i);
                 if (t == NULL) {
-                    ErrorAt(lexer, token->Original, "Uninitialized macro.");
+                    ErrorAt(lexer, token->Original, "uninitialized macro.");
                 }
                 token->Type = t->Type;
                 token->Literal = t->Literal;

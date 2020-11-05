@@ -15,7 +15,7 @@ Vector *NewVector() {
 
 void VectorPush(Vector *v, void *elem) {
     if (v->len == v->capacity) {
-        if (v->capacity <= 100) {
+        if (v->capacity <= 1024) {
             v->capacity *= 2;
         } else {
             v->capacity *= 1.25;
@@ -97,7 +97,50 @@ int MapGetInt(Map *map, char *key, int _default) {
     return _default;
 }
 
-char *format(char *fmt, ...) {
+StringBuilder *NewStringBuilder() {
+    StringBuilder *sb = malloc(sizeof(StringBuilder));
+    sb->data = malloc(8);
+    sb->capacity = 8;
+    sb->len = 0;
+    return sb;
+}
+
+void stringBuilderGrow(StringBuilder *sb, int len) {
+    if (sb->len + len <= sb->capacity) {
+        return;
+    }
+
+    while (sb->len + len > sb->capacity) {
+        if (sb->capacity <= 1024) {
+            sb->capacity *= 2;
+        } else {
+            sb->capacity * 1.25;
+        }
+    }
+    sb->data = realloc(sb->data, sb->capacity);
+}
+
+void StringBuilderAdd(StringBuilder *sb, char c) {
+    stringBuilderGrow(sb, 1);
+    sb->data[sb->len++] = c;
+}
+
+void StringBuilderAppend(StringBuilder *sb, char *s) {
+    StringBuilderAppendN(sb, s, strlen(s));
+}
+
+void StringBuilderAppendN(StringBuilder *sb, char *s, int len) {
+    stringBuilderGrow(sb, len);
+    memcpy(sb->data + sb->len, s, len);
+    sb->len += len;
+}
+
+char *StringBuilderToString(StringBuilder *sb) {
+    StringBuilderAdd(sb, '\0');
+    return sb->data;
+}
+
+char *Format(char *fmt, ...) {
     char buf[2048];
     va_list ap;
     va_start(ap, fmt);

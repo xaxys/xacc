@@ -29,7 +29,7 @@ IR *NewIR(IRType ty) {
     return ir;
 }
 
-Reg *newReg() {
+Reg *NewReg() {
     Reg *r = calloc(1, sizeof(Reg));
     r->vn = nreg++;
     r->rn = -1;
@@ -66,7 +66,7 @@ IR *emitJmpArg(BB *bb, Reg *r) {
 }
 
 Reg *emitImm(int imm) {
-    Reg *r = newReg();
+    Reg *r = NewReg();
     IR *ir = NewIR(IR_IMM);
     ir->r0 = r;
     ir->imm = imm;
@@ -103,7 +103,7 @@ Reg *genLeftValue(Expression *exp) {
     }
 
     if (exp->ty == EXP_ACCSESS) {
-        Reg *r1 = newReg();
+        Reg *r1 = NewReg();
         Reg *r2 = genLeftValue(exp->Exp1);
         Reg *r3 = emitImm(exp->ctype->offset);
         emitIR(IR_ADD, r1, r2, r3);
@@ -116,11 +116,11 @@ Reg *genLeftValue(Expression *exp) {
         IR *ir;
         if (var->Local) {
             ir = NewIR(IR_BPREL);
-            ir->r0 = newReg();
+            ir->r0 = NewReg();
             ir->var = var;
         } else {
             ir = NewIR(IR_LABEL_ADDR);
-            ir->r0 = newReg();
+            ir->r0 = NewReg();
             ir->name = var->Name;
         }
         return ir->r0;
@@ -130,7 +130,7 @@ Reg *genLeftValue(Expression *exp) {
 }
 
 Reg *genUnop(Expression *exp) {
-    Reg *r1 = newReg();
+    Reg *r1 = NewReg();
     Reg *r2 = genExp(exp->Exp1);
     switch (exp->Op->Type) {
     case TOKEN_OP_NOT:
@@ -143,7 +143,7 @@ Reg *genUnop(Expression *exp) {
 }
 
 Reg *genBinop(Expression *exp) {
-    Reg *r1 = newReg();
+    Reg *r1 = NewReg();
     Reg *r2 = genExp(exp->Exp1);
     Reg *r3 = genExp(exp->Exp2);
 
@@ -177,7 +177,7 @@ Reg *genMultiop(Expression *exp) {
         emitJmpArg(last, emitImm(1));
 
         out = last;
-        out->param = newReg();
+        out->param = NewReg();
         return out->param;
     }
     case TOKEN_OP_OR: {
@@ -202,7 +202,7 @@ Reg *genMultiop(Expression *exp) {
         emitJmpArg(last, emitImm(1));
 
         out = last;
-        out->param = newReg();
+        out->param = NewReg();
         return out->param;
     }
     case TOKEN_SEP_COMMA:
@@ -227,7 +227,7 @@ Reg *genExp(Expression *exp) {
         return genMultiop(exp);
     case EXP_VARREF:
     case EXP_ACCSESS: {
-        Reg *r = newReg();
+        Reg *r = NewReg();
         emitLoad(exp, r, genLeftValue(exp));
         return r;
     }
@@ -237,7 +237,7 @@ Reg *genExp(Expression *exp) {
             args[i] = genExp(VectorGet(exp->Exps, i));
 
         IR *ir = NewIR(IR_CALL);
-        ir->r0 = newReg();
+        ir->r0 = NewReg();
         ir->name = exp->Name;
         ir->nargs = VectorSize(exp->Exps);
         memcpy(ir->args, args, sizeof(args));
@@ -246,7 +246,7 @@ Reg *genExp(Expression *exp) {
     case EXP_ADDR:
         return genLeftValue(exp->Exp1);
     case EXP_DEREF: {
-        Reg *r = newReg();
+        Reg *r = NewReg();
         emitLoad(exp, r, genExp(exp->Exp1));
         return r;
     }
@@ -260,7 +260,7 @@ Reg *genExp(Expression *exp) {
     // }
     case EXP_STMT:
         for (int i = 0; i < VectorSize(exp->Stmts); i++)
-            genStmt(exp->Stmts->data[i]);
+            genStmt(VectorGet(exp->Stmts, i));
         return genExp(exp->Exp1);
     case EXP_ASSIGN: {
         Reg *r1 = genExp(exp->Exp2);
@@ -284,7 +284,7 @@ Reg *genExp(Expression *exp) {
         emitJmpArg(last, genExp(exp->Exp2));
 
         out = last;
-        out->param = newReg();
+        out->param = NewReg();
         return out->param;
     }
     default:
@@ -370,7 +370,7 @@ void genStmt(Statement *stmt) {
             Case->bb = NewBB();
 
             BB *next = NewBB();
-            Reg *r2 = newReg();
+            Reg *r2 = NewReg();
             emitIR(IR_EQ, r2, r, emitImm(Case->Cond->Val));
             emitBR(r2, Case->bb, next);
             out = next;
@@ -423,7 +423,7 @@ static void genParam(Var *var, int i) {
     var->address_taken = 1;
 }
 
-void genProgram(Program *program) {
+void GenProgram(Program *program) {
     for (int i = 0; i < VectorSize(program->Functions); i++) {
         fn = VectorGet(program->Functions, i);
 
@@ -435,8 +435,8 @@ void genProgram(Program *program) {
 
         // Emit IR.
         Vector *params = fn->Params;
-        for (int i = 0; i < params->len; i++) {
-            genParam(params->data[i], i);
+        for (int i = 0; i < VectorSize(params); i++) {
+            genParam(VectorGet(params, i), i);
         }
 
         genStmt(fn->Stmt);
@@ -467,7 +467,7 @@ void optimize(IR *ir) {
             return;
 
         if (!var->promoted)
-            var->promoted = newReg();
+            var->promoted = NewReg();
 
         ir->op = IR_NOP;
         ir->r0->promoted = var->promoted;

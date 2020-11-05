@@ -39,6 +39,10 @@ Expression *NewAccess(Token *op, Expression *exp1) {
 Expression *NewAddr(Token *op, Expression *exp1) {
     Expression *exp = NewExp(EXP_ADDR, op);
     exp->Exp1 = exp1;
+
+    if (exp1->ty == EXP_VARREF) {
+        exp1->ID->address_taken = 1;
+    }
     return exp;
 }
 
@@ -116,7 +120,7 @@ Expression *NewStmtExp(Token *t, Vector *exps) {
         VectorPush(v, stmt);
     }
 
-    Expression *exp = NewExp(EXP_STMT, NULL);
+    Expression *exp = NewExp(EXP_STMT, t);
     exp->Stmts = v;
     exp->Exp1 = last;
     exp->ctype = exp->Exp1->ctype;

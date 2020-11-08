@@ -3,6 +3,8 @@
 
 #include "ast.h"
 
+typedef struct IR IR;
+
 typedef enum {
     IR_ILLEGAL = -1,
     IR_ADD,
@@ -35,34 +37,34 @@ typedef enum {
     IR_NOP,
 } IRType;
 
-typedef struct {
-    IRType op;
+struct IR {
+    IRType ty;
 
     Reg *r0;
     Reg *r1;
     Reg *r2;
 
     int imm;
-    int label;
-    Var *var;
+    int Label;
+    Var *ID;
 
     BB *bb1;
     BB *bb2;
 
     // Load/store size in bytes
-    int size;
+    int Size;
 
     // Function call
-    char *name;
-    int nargs;
-    Reg *args[6];
+    char *Name;
+    int NArgs;
+    Reg *Args[6];
 
     // For liveness tracking
-    Vector *kill;
+    Vector *Kill;
 
     // For SSA
-    Reg *bbarg;
-} IR;
+    Reg *bbArg;
+};
 
 IRType GetIRType(TokenType ty);
 

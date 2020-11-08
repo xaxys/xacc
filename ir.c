@@ -21,10 +21,6 @@ IRType GetIRType(TokenType ty) {
         return IR_LT;
     case TOKEN_OP_LE:
         return IR_LE;
-    // case TOKEN_OP_GT:
-    //     return IR_GT;
-    // case TOKEN_OP_GE:
-    //     return IR_GE;
     case TOKEN_OP_BAND:
         return IR_AND;
     case TOKEN_OP_BOR:
@@ -36,6 +32,6 @@ IRType GetIRType(TokenType ty) {
     case TOKEN_OP_SHR:
         return IR_SHR;
     default:
-        return -1;
+        return IR_ILLEGAL;
     }
 }

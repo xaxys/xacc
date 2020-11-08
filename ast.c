@@ -41,7 +41,7 @@ Expression *NewAddr(Token *op, Expression *exp1) {
     exp->Exp1 = exp1;
 
     if (exp1->ty == EXP_VARREF) {
-        exp1->ID->address_taken = 1;
+        exp1->ID->AddressTaken = 1;
     }
     return exp;
 }
@@ -72,6 +72,13 @@ Expression *NewDeref(Token *op, Expression *exp1) {
     Expression *exp = NewExp(EXP_DEREF, op);
     exp->ctype = exp1->ctype->Ptr;
     exp->Exp1 = exp1;
+
+    if (exp->ctype->ty == ARRAY) {
+        Expression *tmp = NewExp(EXP_ADDR, op);
+        tmp->ctype = PtrTo(exp->ctype->ArrPtr);
+        tmp->Exp1 = exp;
+        return tmp;
+    }
     return exp;
 }
 
@@ -105,18 +112,12 @@ Statement *NewExpStmt(Token *t, Expression *exp) {
     return stmt;
 }
 
-// Statement *NewDeclStmt(Token *t, Declaration *decl) {
-//     Statement *stmt = NewStmt(STMT_DECL);
-//     stmt->Decl = decl;
-//     return stmt;
-// }
-
 Expression *NewStmtExp(Token *t, Vector *exps) {
     Expression *last = (Expression *)VectorPop(exps);
 
     Vector *v = NewVector();
     for (int i = 0; i < VectorSize(exps); i++) {
-        Statement *stmt = NewExpStmt(t, exps->data[i]);
+        Statement *stmt = NewExpStmt(t, VectorGet(exps, i));
         VectorPush(v, stmt);
     }
 
@@ -155,9 +156,9 @@ Type *NewType(int ty, int size) {
 }
 
 Type *NewFuncType(Type *returning) {
-  Type *ty = calloc(1, sizeof(Type));
-  ty->Returning = returning;
-  return ty;
+    Type *ty = calloc(1, sizeof(Type));
+    ty->Returning = returning;
+    return ty;
 }
 
 int IsSameType(Type *x, Type *y) {

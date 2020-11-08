@@ -12,6 +12,7 @@ void VectorPush(Vector *v, void *elem);
 void VectorPushInt(Vector *v, int val);
 void *VectorPop(Vector *v);
 void *VectorGet(Vector *v, int i);
+int VectorGetInt(Vector *v, int i);
 void *VectorLast(Vector *v);
 int VectorContain(Vector *v, void *elem);
 int VectorUnion(Vector *v, void *elem);

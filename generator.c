@@ -11,28 +11,28 @@ void genStmt(Statement *stmt);
 
 BB *NewBB() {
     BB *bb = calloc(1, sizeof(BB));
-    bb->label = nLabel++;
-    bb->ir = NewVector();
-    bb->succ = NewVector();
-    bb->pred = NewVector();
-    bb->def_regs = NewVector();
-    bb->in_regs = NewVector();
-    bb->out_regs = NewVector();
+    bb->Label = nLabel++;
+    bb->IRs = NewVector();
+    bb->Succ = NewVector();
+    bb->Pred = NewVector();
+    bb->DefRegs = NewVector();
+    bb->InRegs = NewVector();
+    bb->OutRegs = NewVector();
     VectorPush(fn->bbs, bb);
     return bb;
 }
 
 IR *NewIR(IRType ty) {
     IR *ir = calloc(1, sizeof(IR));
-    ir->op = ty;
-    VectorPush(out->ir, ir);
+    ir->ty = ty;
+    VectorPush(out->IRs, ir);
     return ir;
 }
 
 Reg *NewReg() {
     Reg *r = calloc(1, sizeof(Reg));
-    r->vn = nreg++;
-    r->rn = -1;
+    r->VirtualNum = nreg++;
+    r->RealNum = -1;
     return r;
 }
 
@@ -61,7 +61,7 @@ IR *emitJmp(BB *bb) {
 IR *emitJmpArg(BB *bb, Reg *r) {
     IR *ir = NewIR(IR_JMP);
     ir->bb1 = bb;
-    ir->bbarg = r;
+    ir->bbArg = r;
     return ir;
 }
 
@@ -77,7 +77,7 @@ Reg *genExp(Expression *exp);
 
 void emitLoad(Expression *exp, Reg *dst, Reg *src) {
     IR *ir = emitIR(IR_LOAD, dst, NULL, src);
-    ir->size = exp->ctype->Size;
+    ir->Size = exp->ctype->Size;
 }
 
 // In C, all expressions that can be written on the left-hand side of
@@ -117,11 +117,11 @@ Reg *genLeftValue(Expression *exp) {
         if (var->Local) {
             ir = NewIR(IR_BPREL);
             ir->r0 = NewReg();
-            ir->var = var;
+            ir->ID = var;
         } else {
             ir = NewIR(IR_LABEL_ADDR);
             ir->r0 = NewReg();
-            ir->name = var->Name;
+            ir->Name = var->Name;
         }
         return ir->r0;
     }
@@ -177,8 +177,8 @@ Reg *genMultiop(Expression *exp) {
         emitJmpArg(last, emitImm(1));
 
         out = last;
-        out->param = NewReg();
-        return out->param;
+        out->Param = NewReg();
+        return out->Param;
     }
     case TOKEN_OP_OR: {
         BB *bb = NewBB();
@@ -187,8 +187,8 @@ Reg *genMultiop(Expression *exp) {
         BB *last = NewBB();
 
         for (int i = 0; i < VectorSize(exp->Exps) - 1; i++) {
-            Expression *exp = VectorGet(exp->Exps, i);
-            emitBR(genExp(exp), set1, bb);
+            Expression *tmp = VectorGet(exp->Exps, i);
+            emitBR(genExp(tmp), set1, bb);
             out = bb;
             bb = NewBB();
         }
@@ -202,8 +202,8 @@ Reg *genMultiop(Expression *exp) {
         emitJmpArg(last, emitImm(1));
 
         out = last;
-        out->param = NewReg();
-        return out->param;
+        out->Param = NewReg();
+        return out->Param;
     }
     case TOKEN_SEP_COMMA:
         for (int i = 0; i < VectorSize(exp->Exps) - 1; i++) {
@@ -238,9 +238,9 @@ Reg *genExp(Expression *exp) {
 
         IR *ir = NewIR(IR_CALL);
         ir->r0 = NewReg();
-        ir->name = exp->Name;
-        ir->nargs = VectorSize(exp->Exps);
-        memcpy(ir->args, args, sizeof(args));
+        ir->Name = exp->Name;
+        ir->NArgs = VectorSize(exp->Exps);
+        memcpy(ir->Args, args, sizeof(args));
         return ir->r0;
     }
     case EXP_ADDR:
@@ -267,7 +267,7 @@ Reg *genExp(Expression *exp) {
         Reg *r2 = genLeftValue(exp->Exp1);
 
         IR *ir = emitIR(IR_STORE, NULL, r2, r1);
-        ir->size = exp->ctype->Size;
+        ir->Size = exp->ctype->Size;
         return r1;
     }
     case EXP_COND: {
@@ -284,8 +284,8 @@ Reg *genExp(Expression *exp) {
         emitJmpArg(last, genExp(exp->Exp2));
 
         out = last;
-        out->param = NewReg();
-        return out->param;
+        out->Param = NewReg();
+        return out->Param;
     }
     default:
         assert(0 && "unknown AST type");
@@ -371,8 +371,12 @@ void genStmt(Statement *stmt) {
 
             BB *next = NewBB();
             Reg *r2 = NewReg();
-            emitIR(IR_EQ, r2, r, emitImm(Case->Cond->Val));
-            emitBR(r2, Case->bb, next);
+            if (!Case->Default) {
+                emitIR(IR_EQ, r2, r, emitImm(Case->Cond->Val));
+                emitBR(r2, Case->bb, next);
+            } else {
+                emitJmp(Case->bb);
+            }
             out = next;
         }
         emitJmp(stmt->Break);
@@ -417,10 +421,10 @@ void genStmt(Statement *stmt) {
 
 static void genParam(Var *var, int i) {
     IR *ir = NewIR(IR_STORE_ARG);
-    ir->var = var;
+    ir->ID = var;
     ir->imm = i;
-    ir->size = var->ty->Size;
-    var->address_taken = 1;
+    ir->Size = var->ty->Size;
+    var->AddressTaken = 1;
 }
 
 void GenProgram(Program *program) {
@@ -461,32 +465,32 @@ void GenProgram(Program *program) {
 //  r4 = r2
 //  r3 = r4
 void optimize(IR *ir) {
-    if (ir->op == IR_BPREL) {
-        Var *var = ir->var;
-        if (var->address_taken || var->ty->ty != INT)
+    if (ir->ty == IR_BPREL) {
+        Var *var = ir->ID;
+        if (var->AddressTaken || var->ty->ty != INT)
             return;
 
-        if (!var->promoted)
-            var->promoted = NewReg();
+        if (!var->Promoted)
+            var->Promoted = NewReg();
 
-        ir->op = IR_NOP;
-        ir->r0->promoted = var->promoted;
+        ir->ty = IR_NOP;
+        ir->r0->Promoted = var->Promoted;
         return;
     }
 
-    if (ir->op == IR_LOAD) {
-        if (!ir->r2->promoted)
+    if (ir->ty == IR_LOAD) {
+        if (!ir->r2->Promoted)
             return;
-        ir->op = IR_MOV;
-        ir->r2 = ir->r2->promoted;
+        ir->ty = IR_MOV;
+        ir->r2 = ir->r2->Promoted;
         return;
     }
 
-    if (ir->op == IR_STORE) {
-        if (!ir->r1->promoted)
+    if (ir->ty == IR_STORE) {
+        if (!ir->r1->Promoted)
             return;
-        ir->op = IR_MOV;
-        ir->r0 = ir->r1->promoted;
+        ir->ty = IR_MOV;
+        ir->r0 = ir->r1->Promoted;
         ir->r1 = NULL;
         return;
     }
@@ -497,8 +501,8 @@ void Optimize(Program *program) {
         Function *fn = VectorGet(program->Functions, i);
         for (int i = 0; i < VectorSize(fn->bbs); i++) {
             BB *bb = VectorGet(fn->bbs, i);
-            for (int i = 0; i < VectorSize(bb->ir); i++) {
-                optimize(VectorGet(bb->ir, i));
+            for (int i = 0; i < VectorSize(bb->IRs); i++) {
+                optimize(VectorGet(bb->IRs, i));
             }
         }
     }

@@ -41,6 +41,11 @@ void *VectorGet(Vector *v, int i) {
     return v->data[i];
 }
 
+int VectorGetInt(Vector *v, int i) {
+    assert(i < v->len);
+    return *((int *)(v->data[i]));
+}
+
 void *VectorLast(Vector *v) {
     assert(v->len);
     return v->data[v->len - 1];
@@ -89,9 +94,9 @@ void *MapGet(Map *map, char *key) {
 }
 
 int MapGetInt(Map *map, char *key, int _default) {
-    for (int i = map->keys->len - 1; i >= 0; i--) {
-        if (!strcmp(map->keys->data[i], key)) {
-            return *((int *)(map->vals->data[i]));
+    for (int i = VectorSize(map->keys) - 1; i >= 0; i--) {
+        if (!strcmp(VectorGet(map->keys, i), key)) {
+            return VectorGetInt(map->vals, i);
         }
     }
     return _default;

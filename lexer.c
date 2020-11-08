@@ -5,6 +5,21 @@
 #include <ctype.h>
 #include "lexer.h"
 
+static char escaped[256] = {
+    ['0'] = '\0',
+    ['a'] = '\a',
+    ['b'] = '\b',
+    ['f'] = '\f',
+    ['\n'] = '\n',
+    ['n'] = '\n',
+    ['r'] = '\r',
+    ['t'] = '\t',
+    ['v'] = '\v',
+    ['\\'] = '\\',
+    ['\''] = '\'',
+    ['"'] = '"',
+};
+
 static void ErrorAt(Lexer *lexer, char *loc, char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -92,24 +107,6 @@ char *mustPeekChar(Lexer *lexer) {
     }
 }
 
-char escape(char *p) {
-    switch (*p) {
-    case '0': return '\0';
-    case '\n': return '\n';
-    case 'n': return '\n';
-    case 'r': return '\r';
-    case 't': return '\t';
-    case 'b': return '\b';
-    case 'f': return '\f';
-    case 'v': return '\v';
-    case 'a': return '\a';
-    case '"': return '\"';
-    case '\\': return '\\';
-    case '\'': return '\'';
-    }
-    return -1;
-}
-
 char *readCharConst(Lexer *lexer) {
     mustReadChar(lexer); // read '
     char *startPos = lexer->pos + 1;
@@ -122,10 +119,7 @@ char *readCharConst(Lexer *lexer) {
             ch = mustReadChar(lexer);
         }
         char *c = malloc(1);
-        *c = escape(startPos + 1);
-        if (*c == -1) {
-            ErrorAt(lexer, startPos, "unable to escape character.");
-        }
+        *c = escaped[*(startPos + 1)];
         return c;
     } else {
         char *tmp = mustReadChar(lexer);
@@ -152,16 +146,16 @@ char *readStringConst(Lexer *lexer) {
     }
 
     // copy string
-    char *tmpStart = malloc(ch - startPos);
-    char *tmp = tmpStart;
+    StringBuilder *sb = NewStringBuilder();
     for (char *p = startPos; p < ch; p++) {
         if (*p == '\r' || *p == '\n') continue;
-        if (*p == '\\' && p + 1 < ch) *tmp = escape(++p);
-        else *tmp = *p;
-        tmp++;
+        if (*p == '\\' && p + 1 < ch) {
+            StringBuilderAdd(sb, escaped[*(++p)]);
+        } else {
+            StringBuilderAdd(sb, *p);
+        }
     }
-    *tmp = '\0';
-    return tmpStart;
+    return StringBuilderToString(sb);
 }
 
 char *readNumberConst(Lexer *lexer) {

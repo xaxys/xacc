@@ -7,7 +7,6 @@
 #include "allocator.h"
 #include "gen_x86.h"
 #include "ast.h"
-// #include "irdump.h"
 
 int main(int argc, char *argv[]) {
     if (argc == 2) {
@@ -24,14 +23,13 @@ int main(int argc, char *argv[]) {
         Lexer *lexer = NewLexer(argv[1], chunk);
         Program *program = ParseProgram(lexer);
         GenProgram(program);
-        // dump_ir(program->Functions);
         Optimize(program);
         Analyze(program);
         Allocate(program);
-        gen_x86(program);
+        Genx86(program);
     } else {
         printf("Oops! No input files given.\n");
-		printf("xacc 0.2.0 2020.11.5 Copyright (C) 2020 xaxys.\n");
+		printf("xacc 0.2.3 2020.11.8 Copyright (C) 2020 xaxys.\n");
 		printf("usage: xacc [file]\n");
     }
 }

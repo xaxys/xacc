@@ -145,15 +145,15 @@ struct Var {
     int Local;
 
     // Local variables are compiled to offsets from RBP.
-    int offset;
+    int Offset;
 
     // Global variables are compiled to labels with optional
     // initialized data.
-    char *data;
+    char *Data;
 
     // For optimization passes.
-    int address_taken;
-    Reg *promoted;
+    int AddressTaken;
+    Reg *Promoted;
 };
 
 struct Declaration {
@@ -221,6 +221,7 @@ struct Statement {
     Expression *Step;
 
     // For switch and case
+    int Default;
     Vector *Cases;
     BB *bb;
 
@@ -264,30 +265,30 @@ struct Program {
 };
 
 struct Reg {
-    int vn; // virtual register number
-    int rn; // real register number
+    int VirtualNum; // virtual register number
+    int RealNum; // real register number
 
     // For optimizer
-    Reg *promoted;
+    Reg *Promoted;
 
     // For regalloc
-    int def;
-    int last_use;
-    int spill;
-    Var *var;
+    int Def;
+    int LastUse;
+    int Spill;
+    Var *ID;
 };
 
 struct BB {
-    int label;
-    Vector *ir;
-    Reg *param;
+    int Label;
+    Vector *IRs;
+    Reg *Param;
 
     // For liveness analysis
-    Vector *succ;
-    Vector *pred;
-    Vector *def_regs;
-    Vector *in_regs;
-    Vector *out_regs;
+    Vector *Succ;
+    Vector *Pred;
+    Vector *DefRegs;
+    Vector *InRegs;
+    Vector *OutRegs;
 };
 
 #endif

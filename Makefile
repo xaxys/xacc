@@ -1,5 +1,5 @@
 CFLAGS=-std=c11 -g -static
-SRCS=$(filter-out helloworld.c irdump.c, $(wildcard *.c))
+SRCS=$(filter-out helloworld.c, $(wildcard *.c))
 xacc: $(SRCS)
 	rm -f xacc *.o *~ tmp*
 	cc $(SRCS) -o xacc -g

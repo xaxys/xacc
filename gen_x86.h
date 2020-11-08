@@ -10,6 +10,6 @@ extern char *regs32[];
 extern int num_regs;
 extern int nLabel;
 
-void gen_x86(Program *prog);
+void Genx86(Program *prog);
 
 #endif

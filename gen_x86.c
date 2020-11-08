@@ -40,9 +40,9 @@ static void emit(char *fmt, ...) {
 }
 
 static void emit_cmp(char *insn, IR *ir) {
-  int r0 = ir->r0->rn;
-  int r1 = ir->r1->rn;
-  int r2 = ir->r2->rn;
+  int r0 = ir->r0->RealNum;
+  int r1 = ir->r1->RealNum;
+  int r2 = ir->r2->RealNum;
 
   emit("cmp %s, %s", regs[r1], regs[r2]);
   emit("%s %s", insn, regs8[r0]);
@@ -68,16 +68,16 @@ static char *argreg(int r, int size) {
 }
 
 static void emit_ir(IR *ir, char *ret) {
-  int r0 = ir->r0 ? ir->r0->rn : 0;
-  int r1 = ir->r1 ? ir->r1->rn : 0;
-  int r2 = ir->r2 ? ir->r2->rn : 0;
+  int r0 = ir->r0 ? ir->r0->RealNum : 0;
+  int r1 = ir->r1 ? ir->r1->RealNum : 0;
+  int r2 = ir->r2 ? ir->r2->RealNum : 0;
 
-  switch (ir->op) {
+  switch (ir->ty) {
   case IR_IMM:
     emit("mov %s, %d", regs[r0], ir->imm);
     break;
   case IR_BPREL:
-    emit("lea %s, [rbp%d]", regs[r0], ir->var->offset);
+    emit("lea %s, [rbp%d]", regs[r0], ir->ID->Offset);
     break;
   case IR_MOV:
     emit("mov %s, %s", regs[r0], regs[r2]);
@@ -87,19 +87,19 @@ static void emit_ir(IR *ir, char *ret) {
     emit("jmp %s", ret);
     break;
   case IR_CALL:
-    for (int i = 0; i < ir->nargs; i++)
-      emit("mov %s, %s", argregs[i], regs[ir->args[i]->rn]);
+    for (int i = 0; i < ir->NArgs; i++)
+      emit("mov %s, %s", argregs[i], regs[ir->Args[i]->RealNum]);
 
     emit("push r10");
     emit("push r11");
     emit("mov rax, 0");
-    emit("call %s", ir->name);
+    emit("call %s", ir->Name);
     emit("pop r11");
     emit("pop r10");
     emit("mov %s, rax", regs[r0]);
     break;
   case IR_LABEL_ADDR:
-    emit("lea %s, %s", regs[r0], ir->name);
+    emit("lea %s, %s", regs[r0], ir->Name);
     break;
   case IR_EQ:
     emit_cmp("sete", ir);
@@ -131,31 +131,31 @@ static void emit_ir(IR *ir, char *ret) {
     emit("shr %s, cl", regs[r0]);
     break;
   case IR_JMP:
-    if (ir->bbarg)
-      emit("mov %s, %s", regs[ir->bb1->param->rn], regs[ir->bbarg->rn]);
-    emit("jmp .L%d", ir->bb1->label);
+    if (ir->bbArg)
+      emit("mov %s, %s", regs[ir->bb1->Param->RealNum], regs[ir->bbArg->RealNum]);
+    emit("jmp .L%d", ir->bb1->Label);
     break;
   case IR_BR:
     emit("cmp %s, 0", regs[r2]);
-    emit("jne .L%d", ir->bb1->label);
-    emit("jmp .L%d", ir->bb2->label);
+    emit("jne .L%d", ir->bb1->Label);
+    emit("jmp .L%d", ir->bb2->Label);
     break;
   case IR_LOAD:
-    emit("mov %s, [%s]", reg(r0, ir->size), regs[r2]);
-    if (ir->size == 1)
+    emit("mov %s, [%s]", reg(r0, ir->Size), regs[r2]);
+    if (ir->Size == 1)
       emit("movzb %s, %s", regs[r0], regs8[r0]);
     break;
   case IR_LOAD_SPILL:
-    emit("mov %s, [rbp%d]", regs[r0], ir->var->offset);
+    emit("mov %s, [rbp%d]", regs[r0], ir->ID->Offset);
     break;
   case IR_STORE:
-    emit("mov [%s], %s", regs[r1], reg(r2, ir->size));
+    emit("mov [%s], %s", regs[r1], reg(r2, ir->Size));
     break;
   case IR_STORE_ARG:
-    emit("mov [rbp%d], %s", ir->var->offset, argreg(ir->imm, ir->size));
+    emit("mov [rbp%d], %s", ir->ID->Offset, argreg(ir->imm, ir->Size));
     break;
   case IR_STORE_SPILL:
-    emit("mov [rbp%d], %s", ir->var->offset, regs[r1]);
+    emit("mov [rbp%d], %s", ir->ID->Offset, regs[r1]);
     break;
   case IR_ADD:
     emit("add %s, %s", regs[r0], regs[r2]);
@@ -191,11 +191,11 @@ void emit_code(Function *fn) {
   // Assign an offset from RBP to each local variable.
   int off = 0;
   for (int i = 0; i < fn->LocalVars->len; i++) {
-    Var *var = fn->LocalVars->data[i];
-    off += var->ty->Size;
-    off = roundup(off, var->ty->Align);
-    // off = roundup(off, var->ty->Size);
-    var->offset = -off;
+    Var *ID = fn->LocalVars->data[i];
+    off += ID->ty->Size;
+    off = roundup(off, ID->ty->Align);
+    // off = roundup(off, ID->ty->Size);
+    ID->Offset = -off;
   }
 
   // Emit assembly
@@ -214,9 +214,9 @@ void emit_code(Function *fn) {
 
   for (int i = 0; i < VectorSize(fn->bbs); i++) {
     BB *bb = VectorGet(fn->bbs, i);
-    p(".L%d:", bb->label);
-    for (int i = 0; i < VectorSize(bb->ir); i++) {
-      IR *ir = VectorGet(bb->ir, i);
+    p(".L%d:", bb->Label);
+    for (int i = 0; i < VectorSize(bb->IRs); i++) {
+      IR *ir = VectorGet(bb->IRs, i);
       emit_ir(ir, ret);
     }
   }
@@ -253,20 +253,20 @@ static char *backslash_escape(char *s, int len) {
   return StringBuilderToString(sb);
 }
 
-static void emit_data(Var *var) {
-  if (var->data) {
+static void emit_data(Var *ID) {
+  if (ID->Data) {
     p(".data");
-    p("%s:", var->Name);
-    emit(".ascii \"%s\"", backslash_escape(var->data, var->ty->Size));
+    p("%s:", ID->Name);
+    emit(".ascii \"%s\"", backslash_escape(ID->Data, ID->ty->Size));
     return;
   }
 
   p(".bss");
-  p("%s:", var->Name);
-  emit(".zero %d", var->ty->Size);
+  p("%s:", ID->Name);
+  emit(".zero %d", ID->ty->Size);
 }
 
-void gen_x86(Program *prog) {
+void Genx86(Program *prog) {
   p(".intel_syntax noprefix");
 
   for (int i = 0; i < VectorSize(prog->GlobalVars); i++)

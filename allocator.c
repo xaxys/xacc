@@ -20,15 +20,14 @@
 #include <assert.h>
 #include <stdlib.h>
 
-// Rewrite `A = B op C` to `A = B; A = A op C`.
-void three_to_two(BB *bb) {
+// Rewrite `A = B op C` to `A = B; A = A ty C`.
+void optimizeAssign(BB *bb) {
     Vector *v = NewVector();
 
-    for (int i = 0; i < bb->ir->len; i++) {
-        IR *ir = bb->ir->data[i];
+    for (int i = 0; i < VectorSize(bb->IRs); i++) {
+        IR *ir = VectorGet(bb->IRs, i);
 
-        if (!ir->r0 || !ir->r1)
-        {
+        if (!ir->r0 || !ir->r1) {
             VectorPush(v, ir);
             continue;
         }
@@ -36,7 +35,7 @@ void three_to_two(BB *bb) {
         assert(ir->r0 != ir->r1);
 
         IR *ir2 = calloc(1, sizeof(IR));
-        ir2->op = IR_MOV;
+        ir2->ty = IR_MOV;
         ir2->r0 = ir->r0;
         ir2->r2 = ir->r1;
         VectorPush(v, ir2);
@@ -44,58 +43,58 @@ void three_to_two(BB *bb) {
         ir->r1 = ir->r0;
         VectorPush(v, ir);
     }
-    bb->ir = v;
+    bb->IRs = v;
 }
 
-static void set_last_use(Reg *r, int ic) {
-    if (r && r->last_use < ic)
-        r->last_use = ic;
+static void setLastUse(Reg *r, int ic) {
+    if (r && r->LastUse < ic)
+        r->LastUse = ic;
 }
 
-static Vector *collect_regs(Function *fn) {
+static Vector *collectRegs(Function *fn) {
     Vector *v = NewVector();
     int ic = 1; // instruction counter
 
-    for (int i = 0; i < fn->bbs->len; i++) {
-        BB *bb = fn->bbs->data[i];
+    for (int i = 0; i < VectorSize(fn->bbs); i++) {
+        BB *bb = VectorGet(fn->bbs, i);
 
-        if (bb->param) {
-            bb->param->def = ic;
-            VectorPush(v, bb->param);
+        if (bb->Param) {
+            bb->Param->Def = ic;
+            VectorPush(v, bb->Param);
         }
 
-        for (int i = 0; i < bb->ir->len; i++, ic++) {
-            IR *ir = bb->ir->data[i];
+        for (int i = 0; i < VectorSize(bb->IRs); i++, ic++) {
+            IR *ir = VectorGet(bb->IRs, i);
 
-            if (ir->r0 && !ir->r0->def) {
-                ir->r0->def = ic;
+            if (ir->r0 && !ir->r0->Def) {
+                ir->r0->Def = ic;
                 VectorPush(v, ir->r0);
             }
 
-            set_last_use(ir->r1, ic);
-            set_last_use(ir->r2, ic);
-            set_last_use(ir->bbarg, ic);
+            setLastUse(ir->r1, ic);
+            setLastUse(ir->r2, ic);
+            setLastUse(ir->bbArg, ic);
 
-            if (ir->op == IR_CALL) {
-                for (int i = 0; i < ir->nargs; i++) {
-                    set_last_use(ir->args[i], ic);
+            if (ir->ty == IR_CALL) {
+                for (int i = 0; i < ir->NArgs; i++) {
+                    setLastUse(ir->Args[i], ic);
                 }
             }
         }
 
-        for (int i = 0; i < bb->out_regs->len; i++) {
-            Reg *r = bb->out_regs->data[i];
-            set_last_use(r, ic);
+        for (int i = 0; i < bb->OutRegs->len; i++) {
+            Reg *r = bb->OutRegs->data[i];
+            setLastUse(r, ic);
         }
     }
 
     return v;
 }
 
-static int choose_to_spill(Reg **used) {
+int chooseToSpill(Reg **used) {
     int k = 0;
     for (int i = 1; i < num_regs; i++) {
-        if (used[k]->last_use < used[i]->last_use) {
+        if (used[k]->LastUse < used[i]->LastUse) {
             k = i;
         }
     }
@@ -112,10 +111,10 @@ static void scan(Vector *regs) {
         // Find an unused slot.
         int found = 0;
         for (int i = 0; i < num_regs - 1; i++) {
-            if (used[i] && r->def < used[i]->last_use) {
+            if (used[i] && r->Def < used[i]->LastUse) {
                 continue;
             }
-            r->rn = i;
+            r->RealNum = i;
             used[i] = r;
             found = 1;
             break;
@@ -127,88 +126,88 @@ static void scan(Vector *regs) {
 
         // Choose a register to spill and mark it as "spilled".
         used[num_regs - 1] = r;
-        int k = choose_to_spill(used);
+        int k = chooseToSpill(used);
 
-        r->rn = k;
-        used[k]->rn = num_regs - 1;
-        used[k]->spill = 1;
+        r->RealNum = k;
+        used[k]->RealNum = num_regs - 1;
+        used[k]->Spill = 1;
         used[k] = r;
     }
 }
 
-static void spill_store(Vector *v, IR *ir) {
+static void spillStore(Vector *v, IR *ir) {
     Reg *r = ir->r0;
-    if (!r || !r->spill) {
+    if (!r || !r->Spill) {
         return;
     }
 
     IR *ir2 = calloc(1, sizeof(IR));
-    ir2->op = IR_STORE_SPILL;
+    ir2->ty = IR_STORE_SPILL;
     ir2->r1 = r;
-    ir2->var = r->var;
+    ir2->ID = r->ID;
     VectorPush(v, ir2);
 }
 
-static void spill_load(Vector *v, IR *ir, Reg *r) {
-    if (!r || !r->spill) {
+static void spillLoad(Vector *v, IR *ir, Reg *r) {
+    if (!r || !r->Spill) {
         return;
     }
 
     IR *ir2 = calloc(1, sizeof(IR));
-    ir2->op = IR_LOAD_SPILL;
+    ir2->ty = IR_LOAD_SPILL;
     ir2->r0 = r;
-    ir2->var = r->var;
+    ir2->ID = r->ID;
     VectorPush(v, ir2);
 }
 
-static void emit_spill_code(BB *bb) {
+static void emitSpill(BB *bb) {
     Vector *v = NewVector();
 
-    for (int i = 0; i < bb->ir->len; i++) {
-        IR *ir = bb->ir->data[i];
+    for (int i = 0; i < VectorSize(bb->IRs); i++) {
+        IR *ir = VectorGet(bb->IRs, i);
 
-        spill_load(v, ir, ir->r1);
-        spill_load(v, ir, ir->r2);
-        spill_load(v, ir, ir->bbarg);
+        spillLoad(v, ir, ir->r1);
+        spillLoad(v, ir, ir->r2);
+        spillLoad(v, ir, ir->bbArg);
         VectorPush(v, ir);
-        spill_store(v, ir);
+        spillStore(v, ir);
     }
-    bb->ir = v;
+    bb->IRs = v;
 }
 
 void Allocate(Program *prog) {
-    for (int i = 0; i < prog->Functions->len; i++) {
-        Function *fn = prog->Functions->data[i];
+    for (int i = 0; i < VectorSize(prog->Functions); i++) {
+        Function *fn = VectorGet(prog->Functions, i);
 
         // Convert SSA to x86-ish two-address form.
-        for (int i = 0; i < fn->bbs->len; i++) {
-            BB *bb = fn->bbs->data[i];
-            three_to_two(bb);
+        for (int i = 0; i < VectorSize(fn->bbs); i++) {
+            BB *bb = VectorGet(fn->bbs, i);
+            optimizeAssign(bb);
         }
 
         // Allocate registers and decide which registers to spill.
-        Vector *regs = collect_regs(fn);
+        Vector *regs = collectRegs(fn);
         scan(regs);
 
         // Reserve a stack area for spilled registers.
-        for (int i = 0; i < regs->len; i++) {
-            Reg *r = regs->data[i];
-            if (!r->spill)
+        for (int i = 0; i < VectorSize(regs); i++) {
+            Reg *r = VectorGet(regs, i);
+            if (!r->Spill)
                 continue;
 
-            Var *var = calloc(1, sizeof(Var));
-            var->ty = PtrTo(&IntType);
-            var->Local = 1;
-            var->Name = "spill";
+            Var *ID = calloc(1, sizeof(Var));
+            ID->ty = PtrTo(&IntType);
+            ID->Local = 1;
+            ID->Name = "spill";
 
-            r->var = var;
-            VectorPush(fn->LocalVars, var);
+            r->ID = ID;
+            VectorPush(fn->LocalVars, ID);
         }
 
         // Convert accesses to spilled registers to loads and stores.
         for (int i = 0; i < fn->bbs->len; i++) {
             BB *bb = fn->bbs->data[i];
-            emit_spill_code(bb);
+            emitSpill(bb);
         }
     }
 }

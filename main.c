@@ -21,7 +21,8 @@ int main(int argc, char *argv[]) {
         chunk[flen] = 0;
 
         Lexer *lexer = NewLexer(argv[1], chunk);
-        Program *program = ParseProgram(lexer);
+        Parser *parser = NewParser(lexer);
+        Program *program = ParseProgram(parser);
         GenProgram(program);
         Optimize(program);
         Analyze(program);
@@ -29,7 +30,7 @@ int main(int argc, char *argv[]) {
         Genx86(program);
     } else {
         printf("Oops! No input files given.\n");
-		printf("xacc 0.2.3 2020.11.8 Copyright (C) 2020 xaxys.\n");
+		printf("xacc 0.3.0 2020.11.12 Copyright (C) 2020 xaxys.\n");
 		printf("usage: xacc [file]\n");
     }
 }

@@ -93,8 +93,6 @@ char *GetTokenTypeLiteral(TokenType ty) {
         return "...";
     case TOKEN_PREOP:
         return "#";
-    case TOKEN_SEP_EOLN:
-        return "<EOLN>";
     case TOKEN_SEP_SEMI:
         return ";";   
     case TOKEN_SEP_COMMA:

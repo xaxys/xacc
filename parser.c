@@ -6,35 +6,15 @@
 #include "parser.h"
 #include "token.h"
 
-typedef struct Env {
-    Map *vars;
-    Map *typedefs;
-    Map *tags;
-    struct Env *prev;
-
-    Vector *LocalVars;
-    Vector *Breaks;
-    Vector *Continues;
-    Vector *Switches;
-} Env;
-
-Env *env;
-
-Program *program;
-
-Vector *lvars;
-Vector *breaks;
-Vector *continues;
-Vector *switches;
 int nLabel = 1;
 
 // declare forward.
-Statement *parseStmt(Lexer *lexer);
-Statement *parseCompoundStmt(Lexer *lexer);
-Expression *parseAssign(Lexer *lexer);
-Expression *parseExp(Lexer *lexer);
-Expression *NewAssignEqual(Token *op, Expression *exp1, Expression *exp2);
-Declaration *Declarator(Lexer *lexer, Type *ty);
+Statement *parseStmt(Parser *parser);
+Statement *parseCompoundStmt(Parser *parser);
+Expression *parseAssign(Parser *parser);
+Expression *parseExp(Parser *parser);
+Expression *NewAssignEqual(Parser *parser, Token *op, Expression *exp1, Expression *exp2);
+Declaration *Declarator(Parser *parser, Type *ty);
 
 static void ErrorAt(Lexer *lexer, char *loc, char *fmt, ...) {
     va_list ap;
@@ -80,6 +60,12 @@ Env *newEnv(Env *prev) {
     return env;
 }
 
+Parser *NewParser(Lexer *lexer) {
+    Parser *parser = calloc(1, sizeof(Parser));
+    parser->env = newEnv(NULL);
+    parser->lexer = lexer;
+}
+
 Var *getVar(Env *env, char *name) {
     for (Env *e = env; e; e = e->prev) {
         Var *var = MapGet(e->vars, name);
@@ -104,32 +90,31 @@ Type *getTag(Env *env, char *name) {
     return NULL;
 }
 
-Var *addLocalVar(Type *ty, char *name) {
+Var *addLocalVar(Parser *parser, Type *ty, char *name) {
     Var *var = calloc(1, sizeof(Var));
     var->ty = ty;
     var->Local = 1;
     var->Name = name;
-    MapPut(env->vars, name, var);
-    VectorPush(lvars, var);
+    MapPut(parser->env->vars, name, var);
+    VectorPush(parser->LocalVars, var);
     return var;
 }
 
-Var *addGlobalVar(Program* program, Type *ty, char *name, char *data, int _extern) {
+Var *addGlobalVar(Parser *parser, Type *ty, char *name, char *data, int _extern) {
     Var *var = calloc(1, sizeof(Var));
     var->ty = ty;
     var->Local = 0;
     var->Name = name;
     var->Data = data;
-    var->Promoted = NULL;
-    MapPut(env->vars, name, var);
-    if (!_extern) VectorPush(program->GlobalVars, var);
+    MapPut(parser->env->vars, name, var);
+    if (!_extern) VectorPush(parser->program->GlobalVars, var);
     return var;
 }
 
-Expression *NewStringExp(char *s) {
+Expression *NewStringExp(Parser *parser, char *s) {
     Type *ty = ArrayOf(&CharType, strlen(s)+1);
     char *name = Format(".L.str%d", nLabel++);
-    Var *var = addGlobalVar(program, ty, name, s, 0);
+    Var *var = addGlobalVar(parser, ty, name, s, 0);
     Expression *exp = NewVarref(NULL, var);
 
     if (exp->ctype->ty == ARRAY) {
@@ -151,16 +136,16 @@ Expression *scalePtr(Expression *exp, Type *ty) {
     return NewBinop(token, exp, NewIntExp(ty->Size, token));
 }
 
-Expression *parseLocalVar(Lexer *lexer, Token *token) {
-    Var *var = getVar(env, token->Literal);
-    if (!var) Error(lexer, token, "undefined variable");
+Expression *parseLocalVar(Parser *parser, Token *token) {
+    Var *var = getVar(parser->env, token->Literal);
+    if (!var) Error(parser->lexer, token, "undefined variable");
     Expression *exp = NewVarref(token, var);
     exp->Name = token->Literal;
     return exp;
 }
 
-Expression *parseFuncCall(Lexer *lexer, Token *token) {
-    Var *var = getVar(env, token->Literal);
+Expression *parseFuncCall(Parser *parser, Token *token) {
+    Var *var = getVar(parser->env, token->Literal);
 
     Expression *exp = NewExp(EXP_FUNCCALL, token);
     exp->Name = token->Literal;
@@ -170,36 +155,36 @@ Expression *parseFuncCall(Lexer *lexer, Token *token) {
     if (var && var->ty->ty == FUNC) {
         exp->ctype = var->ty;
     } else {
-        Error(lexer, token, "undefined function");
+        Error(parser->lexer, token, "undefined function");
         exp->ctype = NewFuncType(&IntType);
     }
 
-    while (!ConsumeToken(lexer, TOKEN_SEP_RPAREN)) {
+    while (!ConsumeToken(parser->lexer, TOKEN_SEP_RPAREN)) {
         if (VectorSize(exp->Exps) > 0) {
-            ExpectToken(lexer, TOKEN_SEP_COMMA);
+            ExpectToken(parser->lexer, TOKEN_SEP_COMMA);
         }
-        VectorPush(exp->Exps, parseAssign(lexer));
+        VectorPush(exp->Exps, parseAssign(parser));
     }
 
     exp->ctype = exp->ID->ty->Returning;
     return exp;
 }
 
-Expression *parseStmtExp(Lexer *lexer) {
-    Token *token = PeekToken(lexer);
+Expression *parseStmtExp(Parser *parser) {
+    Token *token = PeekToken(parser->lexer);
     Vector *stmts = NewVector();
 
-    env = newEnv(env);
+    parser->env = newEnv(parser->env);
     Token *endToken = NULL;
     do {
-        VectorPush(stmts, parseStmt(lexer));
-        endToken = ConsumeToken(lexer, TOKEN_SEP_RCURLY);
+        VectorPush(stmts, parseStmt(parser));
+        endToken = ConsumeToken(parser->lexer, TOKEN_SEP_RCURLY);
     } while (!endToken);
-    env = env->prev;
+    parser->env = parser->env->prev;
 
     Statement *last = VectorPop(stmts);
     if (last->ty != STMT_EXP) {
-        Error(lexer, endToken, "statement expression returning void");
+        Error(parser->lexer, endToken, "statement expression returning void");
     }
 
     Expression *exp = NewExp(EXP_STMT, token);
@@ -209,53 +194,56 @@ Expression *parseStmtExp(Lexer *lexer) {
     return exp;
 }
 
-Expression *parsePrimary(Lexer *lexer) {
+Expression *parsePrimary(Parser *parser) {
     // 0 primary
-    Token *token = PeekToken(lexer);
+    Token *token = PeekToken(parser->lexer);
 
     if (token->Type == TOKEN_SEP_LPAREN) {
-        NextToken(lexer);
-        if (ConsumeToken(lexer, TOKEN_SEP_LCURLY)) {
-            return parseStmtExp(lexer);
+        NextToken(parser->lexer);
+        if (ConsumeToken(parser->lexer, TOKEN_SEP_LCURLY)) {
+            return parseStmtExp(parser);
         }
-        Expression *exp = parseExp(lexer);
-        ExpectToken(lexer, TOKEN_SEP_RPAREN);
+        Expression *exp = parseExp(parser);
+        ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
         return exp;
     }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
     if (token->Type == TOKEN_NUMBER) {
-        NextToken(lexer);
-        return NewIntExp(atoi(token->Literal), token);
+        NextToken(parser->lexer);
+        return NewIntExp((int)token->Literal, token);
     }
+#pragma GCC diagnostic pop
 
     if (token->Type == TOKEN_CHAR) {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         return NewCharExp(*(token->Literal), token);
     }
 
     if (token->Type == TOKEN_STRING) {
-        NextToken(lexer);
-        return NewStringExp(token->Literal);
+        NextToken(parser->lexer);
+        return NewStringExp(parser, token->Literal);
     }
 
     if (token->Type == TOKEN_IDENTIFIER) {
-        NextToken(lexer);
-        if (ConsumeToken(lexer, TOKEN_SEP_LPAREN)) {
-            return parseFuncCall(lexer, token);
+        NextToken(parser->lexer);
+        if (ConsumeToken(parser->lexer, TOKEN_SEP_LPAREN)) {
+            return parseFuncCall(parser, token);
         }
-        return parseLocalVar(lexer, token);
+        return parseLocalVar(parser, token);
     }
  
-    Error(lexer, token, "primary expression expected.");
+    Error(parser->lexer, token, "primary expression expected.");
 }
 
 // `x++` where x is of type T is compiled as
 // `({ T *y = &x; T z = *y; *y = *y + 1; z; })`.
-Expression *NewPostIncrease(Token *token, Expression *exp, int imm) {
+Expression *NewPostIncrease(Parser *parser, Token *token, Expression *exp, int imm) {
     Vector *v = NewVector();
 
-    Var *var1 = addLocalVar(PtrTo(exp->ctype), "tmp1");
-    Var *var2 = addLocalVar(exp->ctype, "tmp2");
+    Var *var1 = addLocalVar(parser, PtrTo(exp->ctype), "tmp1");
+    Var *var2 = addLocalVar(parser, exp->ctype, "tmp2");
 
     Expression *exp1 = NewExp(EXP_ASSIGN, token);
     exp1->Exp1 = NewVarref(token, var1);
@@ -283,47 +271,47 @@ Expression *NewPostIncrease(Token *token, Expression *exp, int imm) {
     return NewStmtExp(token, v);
 }
 
-Expression *parsePostPrefix(Lexer  *lexer) {
+Expression *parsePostPrefix(Parser *parser) {
     // 1 x++, x--
-    Expression *exp = parsePrimary(lexer);
+    Expression *exp = parsePrimary(parser);
     while (1) {
-        Token *token = PeekToken(lexer);
+        Token *token = PeekToken(parser->lexer);
         if (token->Type == TOKEN_OP_ADDSELF) {
-            NextToken(lexer);
-            exp = NewPostIncrease(token, exp, 1);
+            NextToken(parser->lexer);
+            exp = NewPostIncrease(parser, token, exp, 1);
             continue;
         }
 
         if (token->Type == TOKEN_OP_SUBSELF) {
-            NextToken(lexer);
-            exp = NewPostIncrease(token, exp, -1);
+            NextToken(parser->lexer);
+            exp = NewPostIncrease(parser, token, exp, -1);
             continue;
         }
 
         if (token->Type == TOKEN_SEP_DOT) {
-            NextToken(lexer);
+            NextToken(parser->lexer);
             exp = NewAccess(token, exp);
-            exp->Name = ExpectToken(lexer, TOKEN_IDENTIFIER)->Literal;
+            exp->Name = ExpectToken(parser->lexer, TOKEN_IDENTIFIER)->Literal;
             continue;
         }
 
         if (token->Type == TOKEN_OP_ARROW) {
-            NextToken(lexer);
+            NextToken(parser->lexer);
             Expression *tmp = NewDeref(token, exp);
 
             exp = NewAccess(token, tmp);
-            exp->Name = ExpectToken(lexer, TOKEN_IDENTIFIER)->Literal;
+            exp->Name = ExpectToken(parser->lexer, TOKEN_IDENTIFIER)->Literal;
             continue;
         }
 
         if (token->Type == TOKEN_SEP_LBRACK) {
-            NextToken(lexer);
+            NextToken(parser->lexer);
             token->Type = TOKEN_OP_ADD;
-            Expression *idx = scalePtr(parseAssign(lexer), exp->ctype->Ptr);
+            Expression *idx = scalePtr(parseAssign(parser), exp->ctype->Ptr);
             Expression *tmp = NewBinop(token, exp, idx);
             tmp->ctype = tmp->Exp1->ctype;
             exp = NewDeref(token, tmp); 
-            ExpectToken(lexer, TOKEN_SEP_RBRACK);
+            ExpectToken(parser->lexer, TOKEN_SEP_RBRACK);
             continue;
         }
 
@@ -331,13 +319,13 @@ Expression *parsePostPrefix(Lexer  *lexer) {
     }
 }
 
-Expression *parseUnary(Lexer *lexer) {
+Expression *parseUnary(Parser *parser) {
     // 2 -, !, ~, *, &, ++x, --x
-    Token *token = PeekToken(lexer);
+    Token *token = PeekToken(parser->lexer);
     // -
     if (token->Type == TOKEN_OP_SUB) {
-        NextToken(lexer);
-        Expression *exp = parseUnary(lexer);
+        NextToken(parser->lexer);
+        Expression *exp = parseUnary(parser);
 
         //optimize const exp
         if (IsNumExp(exp)) {
@@ -345,7 +333,8 @@ Expression *parseUnary(Lexer *lexer) {
         } else {
             exp = NewBinop(token, NewIntExp(0, NULL), exp);
             if (!IsNumType(exp->Exp2->ctype)) {
-                Error(lexer, token, "the right side of the operator is not a number.");
+                Error(parser->lexer, token,
+                    "the right side of the operator is not a number.");
             }
             exp->ctype = &IntType;
         }
@@ -354,8 +343,8 @@ Expression *parseUnary(Lexer *lexer) {
     // !, ~
     if (token->Type == TOKEN_OP_NOT ||
         token->Type == TOKEN_OP_BNOT) {
-        NextToken(lexer);
-        Expression *exp = parseUnary(lexer);
+        NextToken(parser->lexer);
+        Expression *exp = parseUnary(parser);
 
         //optimize const exp
         if (IsNumExp(exp)) {
@@ -368,7 +357,8 @@ Expression *parseUnary(Lexer *lexer) {
         } else {
             exp = NewUnop(token, exp);
             if (!IsNumType(exp->Exp1->ctype)) {
-                Error(lexer, token, "the right side of the operator is not a number.");
+                Error(parser->lexer, token,
+                    "the right side of the operator is not a number.");
             }
             exp->ctype = &IntType;
         }
@@ -376,15 +366,15 @@ Expression *parseUnary(Lexer *lexer) {
     }
     // *
     if (token->Type == TOKEN_OP_MUL) {
-        NextToken(lexer);
-        Expression *exp = NewDeref(token, parseUnary(lexer));
+        NextToken(parser->lexer);
+        Expression *exp = NewDeref(token, parseUnary(parser));
 
         if (exp->Exp1->ctype->ty != PTR) {
-            Error(lexer, token, "operand must be a pointer.");
+            Error(parser->lexer, token, "operand must be a pointer.");
         }
 
         if (exp->Exp1->ctype->Ptr->ty == VOID) {
-            Error(lexer, token, "cannot dereference void pointer.");
+            Error(parser->lexer, token, "cannot dereference void pointer.");
         }
         exp->ctype = exp->Exp1->ctype->Ptr;
 
@@ -392,11 +382,11 @@ Expression *parseUnary(Lexer *lexer) {
     }
     // &
     if (token->Type == TOKEN_OP_BAND) {
-        NextToken(lexer);
-        Expression *exp = NewAddr(token, parseUnary(lexer));
+        NextToken(parser->lexer);
+        Expression *exp = NewAddr(token, parseUnary(parser));
 
         if (!IsLvalExp(exp->Exp1)) {
-            Error(lexer, token, "operand must be a lvalue expression.");
+            Error(parser->lexer, token, "operand must be a lvalue expression.");
         }
         exp->ctype = PtrTo(exp->Exp1->ctype);
         if (exp->Exp1->ty == EXP_VARREF) {
@@ -407,27 +397,27 @@ Expression *parseUnary(Lexer *lexer) {
     }
     // ++
     if (token->Type == TOKEN_OP_ADDSELF) {
-        NextToken(lexer);
-        return NewAssignEqual(token, parseUnary(lexer), NewIntExp(1, token));
+        NextToken(parser->lexer);
+        return NewAssignEqual(parser, token, parseUnary(parser), NewIntExp(1, token));
     }
     // --
     if (token->Type == TOKEN_OP_SUBSELF) {
-        NextToken(lexer);
-        return NewAssignEqual(token, parseUnary(lexer), NewIntExp(1, token));
+        NextToken(parser->lexer);
+        return NewAssignEqual(parser, token, parseUnary(parser), NewIntExp(1, token));
     }
 
-    return parsePostPrefix(lexer);
+    return parsePostPrefix(parser);
 }
 
-Expression *parseMulDivMod(Lexer *lexer) {
+Expression *parseMulDivMod(Parser *parser) {
     // 3 *, /, %
-    Expression *exp = parseUnary(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseUnary(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_MUL ||
            token->Type == TOKEN_OP_DIV ||
            token->Type == TOKEN_OP_MOD) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseUnary(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseUnary(parser));
 
         // optimize const exp
         if (IsNumExp(exp->Exp1) && IsNumExp(exp->Exp2)) {
@@ -447,28 +437,30 @@ Expression *parseMulDivMod(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "the right side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseAddSub(Lexer *lexer) {
+Expression *parseAddSub(Parser *parser) {
     // 4 +, -
-    Expression *exp = parseMulDivMod(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseMulDivMod(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_ADD ||
            token->Type == TOKEN_OP_SUB) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseMulDivMod(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseMulDivMod(parser));
 
         // optimize const exp
         if (IsNumExp(exp->Exp1) && IsNumExp(exp->Exp2)) {
@@ -494,7 +486,7 @@ Expression *parseAddSub(Lexer *lexer) {
             }
 
             if (!IsNumType(exp->Exp2->ctype)) {
-                ErrorAt(lexer, token->Original,
+                ErrorAt(parser->lexer, token->Original,
                       "the %s side of the operator is not a number.",
                       swaped ? "left" : "right");
             }
@@ -512,7 +504,7 @@ Expression *parseAddSub(Lexer *lexer) {
             if (exp->Exp1->ctype->ty == PTR &&
                 exp->Exp2->ctype->ty == PTR) {
                 if (!IsSameType(exp->Exp1->ctype, exp->Exp2->ctype)) {
-                    Error(lexer, token, "incompatible pointer.");
+                    Error(parser->lexer, token, "incompatible pointer.");
                 } else {
                     exp = scalePtr(exp, exp->Exp1->ctype);
                     exp->ctype = exp->Exp1->ctype;
@@ -523,20 +515,20 @@ Expression *parseAddSub(Lexer *lexer) {
         }
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseShift(Lexer *lexer) {
+Expression *parseShift(Parser *parser) {
     // 5 >>, <<
-    Expression *exp = parseAddSub(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseAddSub(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_SHL ||
            token->Type == TOKEN_OP_SHR) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseAddSub(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseAddSub(parser));
 
         // optimize
         if (IsNumExp(exp->Exp1) && IsNumExp(exp->Exp2)) {
@@ -553,30 +545,32 @@ Expression *parseShift(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "the right side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseRelation(Lexer *lexer) {
+Expression *parseRelation(Parser *parser) {
     // 6 >, >=, <, <=
-    Expression *exp = parseShift(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseShift(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_GT ||
            token->Type == TOKEN_OP_GE ||
            token->Type == TOKEN_OP_LT ||
            token->Type == TOKEN_OP_LE) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseShift(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseShift(parser));
 
         // trans great to less
         if (token->Type == TOKEN_OP_GT ||
@@ -607,28 +601,30 @@ Expression *parseRelation(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "the right side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseEqual(Lexer *lexer) {
+Expression *parseEqual(Parser *parser) {
     // 7 ==, !=
-    Expression *exp = parseRelation(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseRelation(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_EQ ||
            token->Type == TOKEN_OP_NE) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseRelation(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseRelation(parser));
 
         // optimize
         if (IsNumExp(exp->Exp1) && IsNumExp(exp->Exp2)) {
@@ -645,27 +641,29 @@ Expression *parseEqual(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "the right side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseBitAnd(Lexer *lexer) {
+Expression *parseBitAnd(Parser *parser) {
     // 8 &
-    Expression *exp = parseEqual(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseEqual(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_BAND) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseEqual(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseEqual(parser));
 
         // optimize
         if (IsNumExp(exp->Exp1) && IsNumExp(exp->Exp2)) {
@@ -675,27 +673,29 @@ Expression *parseBitAnd(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "the right side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseBitXOr(Lexer *lexer) {
+Expression *parseBitXOr(Parser *parser) {
     // 9 ^
-    Expression *exp = parseBitAnd(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseBitAnd(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_BXOR) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseBitAnd(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseBitAnd(parser));
 
         // optimize
         if (IsNumExp(exp->Exp1) && IsNumExp(exp->Exp2)) {
@@ -705,27 +705,29 @@ Expression *parseBitXOr(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "the right side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseBitOr(Lexer *lexer) {
+Expression *parseBitOr(Parser *parser) {
     // 10 |
-    Expression *exp = parseBitXOr(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseBitXOr(parser);
+    Token *token = PeekToken(parser->lexer);
     while (token->Type == TOKEN_OP_BOR) {
-        NextToken(lexer);
-        exp = NewBinop(token, exp, parseBitXOr(lexer));
+        NextToken(parser->lexer);
+        exp = NewBinop(token, exp, parseBitXOr(parser));
 
         // optimize
         if (IsNumExp(exp->Exp1) && IsNumExp(exp->Exp2)) {
@@ -735,24 +737,26 @@ Expression *parseBitOr(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp->Exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         if (!IsNumType(exp->Exp2->ctype)) {
-            Error(lexer, token, "the right side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the right side of the operator is not a number.");
         }
         exp->ctype = &IntType;
 
         nextLoop:
-        token = PeekToken(lexer);
+        token = PeekToken(parser->lexer);
     }
 
     return exp;
 }
 
-Expression *parseLogicalAnd(Lexer *lexer) {
+Expression *parseLogicalAnd(Parser *parser) {
     // 11 &&
-    Expression *exp1 = parseBitOr(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp1 = parseBitOr(parser);
+    Token *token = PeekToken(parser->lexer);
     if (token->Type != TOKEN_OP_AND) return exp1;
     else {
         Expression *expList = NewExp(EXP_MULTIOP, token);
@@ -761,16 +765,18 @@ Expression *parseLogicalAnd(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         expList->ctype = &IntType;
 
-        while (token = ConsumeToken(lexer, TOKEN_OP_AND)) {
-            Expression *exp = parseBitOr(lexer);
+        while (token = ConsumeToken(parser->lexer, TOKEN_OP_AND)) {
+            Expression *exp = parseBitOr(parser);
 
             // check type
             if (!IsNumType(exp->ctype)) {
-                Error(lexer, token, "the right side of the operator is not a number.");
+                Error(parser->lexer, token,
+                    "the right side of the operator is not a number.");
             }
 
             VectorPush(expList->Exps, exp);
@@ -779,10 +785,10 @@ Expression *parseLogicalAnd(Lexer *lexer) {
     }
 }
 
-Expression *parseLogicalOr(Lexer *lexer) {
+Expression *parseLogicalOr(Parser *parser) {
     // 12 ||
-    Expression *exp1 = parseLogicalAnd(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp1 = parseLogicalAnd(parser);
+    Token *token = PeekToken(parser->lexer);
     if (token->Type != TOKEN_OP_OR) return exp1;
     else {
         Expression *expList = NewExp(EXP_MULTIOP, token);
@@ -791,16 +797,18 @@ Expression *parseLogicalOr(Lexer *lexer) {
 
         // check type
         if (!IsNumType(exp1->ctype)) {
-            Error(lexer, token, "the left side of the operator is not a number.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a number.");
         }
         expList->ctype = &IntType;
 
-        while (token = ConsumeToken(lexer, TOKEN_OP_OR)) {
-            Expression *exp = parseLogicalAnd(lexer);
+        while (token = ConsumeToken(parser->lexer, TOKEN_OP_OR)) {
+            Expression *exp = parseLogicalAnd(parser);
 
             // check type
             if (!IsNumType(exp->ctype)) {
-                Error(lexer, token, "the right side of the operator is not a number.");
+                Error(parser->lexer, token,
+                    "the right side of the operator is not a number.");
             }
 
             VectorPush(expList->Exps, exp);
@@ -809,20 +817,20 @@ Expression *parseLogicalOr(Lexer *lexer) {
     }
 }
 
-Expression *parseConditional(Lexer *lexer) {
+Expression *parseConditional(Parser *parser) {
     // 13 condition
-    Expression *exp = parseLogicalOr(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseLogicalOr(parser);
+    Token *token = PeekToken(parser->lexer);
     if (token->Type != TOKEN_OP_QST) {
         return exp;
     }
 
-    NextToken(lexer);
+    NextToken(parser->lexer);
     Expression *cond = NewExp(EXP_COND, token);
     cond->Cond = exp;
-    cond->Exp1 = parseExp(lexer);
-    ExpectToken(lexer, TOKEN_SEP_COLON);
-    cond->Exp2 = parseExp(lexer);
+    cond->Exp1 = parseExp(parser);
+    ExpectToken(parser->lexer, TOKEN_SEP_COLON);
+    cond->Exp2 = parseExp(parser);
     cond->ctype = cond->Exp1->ctype;
 
     return cond;
@@ -830,9 +838,9 @@ Expression *parseConditional(Lexer *lexer) {
 
 // `x op= y` where x is of type T is compiled as
 // `({ T *z = &x; *z = *z op y; })`.
-Expression *NewAssignEqual(Token *op, Expression *exp1, Expression *exp2) {
+Expression *NewAssignEqual(Parser *parser, Token *op, Expression *exp1, Expression *exp2) {
     Vector *v = NewVector();
-    Var *var = addLocalVar(PtrTo(exp1->ctype), "tmp");
+    Var *var = addLocalVar(parser, PtrTo(exp1->ctype), "tmp");
 
     // T *z = &x
     Expression *tmp1 = NewExp(EXP_ASSIGN, op);
@@ -852,51 +860,53 @@ Expression *NewAssignEqual(Token *op, Expression *exp1, Expression *exp2) {
     return NewStmtExp(op, v);
 }
 
-Expression *parseAssign(Lexer *lexer) {
+Expression *parseAssign(Parser *parser) {
     // 14 assign
-    Expression *exp = parseConditional(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp = parseConditional(parser);
+    Token *token = PeekToken(parser->lexer);
 
     if (token->Type == TOKEN_OP_ASSIGN) {
-        NextToken(lexer);
+        NextToken(parser->lexer);
 
         // check type
         if (!IsLvalExp(exp)) {
-            Error(lexer, token, "the left side of the operator is not a lvalue.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a lvalue.");
         }
 
         Expression *tmp = NewExp(EXP_ASSIGN, token);
         tmp->Exp1 = exp;
-        tmp->Exp2 = parseAssign(lexer);
+        tmp->Exp2 = parseAssign(parser);
         exp = tmp;
         exp->ctype = exp->Exp1->ctype;
     } else if (IsOpEqual(token->Type)) {
-        NextToken(lexer);
+        NextToken(parser->lexer);
 
         // check type
         if (!IsLvalExp(exp)) {
-            Error(lexer, token, "the left side of the operator is not a lvalue.");
+            Error(parser->lexer, token,
+                "the left side of the operator is not a lvalue.");
         }
 
         Type *ty = exp->ctype;
-        exp = NewAssignEqual(token, exp, parseAssign(lexer));
+        exp = NewAssignEqual(parser, token, exp, parseAssign(parser));
         exp->ctype = ty;
     }
     return exp;
 }
 
-Expression *parseExp(Lexer *lexer) {
+Expression *parseExp(Parser *parser) {
     // 15 explist
-    Expression *exp1 = parseAssign(lexer);
-    Token *token = PeekToken(lexer);
+    Expression *exp1 = parseAssign(parser);
+    Token *token = PeekToken(parser->lexer);
     if (token->Type != TOKEN_SEP_COMMA) return exp1;
     else {
         Expression *exp;
         Expression *expList = NewExp(EXP_MULTIOP, token);
         expList->Exps = NewVector();
         VectorPush(expList->Exps, exp1);
-        while (ConsumeToken(lexer, TOKEN_SEP_COMMA)){
-            exp = parseExp(lexer);
+        while (ConsumeToken(parser->lexer, TOKEN_SEP_COMMA)){
+            exp = parseExp(parser);
             VectorPush(expList->Exps, exp);
         }
         expList->ctype = exp->ctype;
@@ -904,24 +914,24 @@ Expression *parseExp(Lexer *lexer) {
     }
 }
 
-int parseConstExp(Lexer *lexer) {
-    Token *token = PeekToken(lexer);
-    Expression *exp = parseExp(lexer);
+int parseConstExp(Parser *parser) {
+    Token *token = PeekToken(parser->lexer);
+    Expression *exp = parseExp(parser);
     if (exp->ty != EXP_INT) 
-        Error(lexer, token, "constant expression expected.");
+        Error(parser->lexer, token, "constant expression expected.");
     return exp->Val;
 }
 
-Type *parseArray(Lexer *lexer, Type *ty) {
+Type *parseArray(Parser *parser, Type *ty) {
     Vector *v = NewVector();
 
-    while (ConsumeToken(lexer, TOKEN_SEP_LBRACK)) {
-        if (ConsumeToken(lexer, TOKEN_SEP_RBRACK)) {
+    while (ConsumeToken(parser->lexer, TOKEN_SEP_LBRACK)) {
+        if (ConsumeToken(parser->lexer, TOKEN_SEP_RBRACK)) {
             VectorPushInt(v, -1);
             continue;
         }
-        VectorPushInt(v, parseConstExp(lexer));
-        ExpectToken(lexer, TOKEN_SEP_RBRACK);
+        VectorPushInt(v, parseConstExp(parser));
+        ExpectToken(parser->lexer, TOKEN_SEP_RBRACK);
     }
 
     for (int i = VectorSize(v) - 1; i >= 0; i--) {
@@ -931,8 +941,8 @@ Type *parseArray(Lexer *lexer, Type *ty) {
     return ty;
 }
 
-Declaration *DirectDeclaration(Lexer *lexer, Type *ty) {
-    Token *token = PeekToken(lexer);
+Declaration *DirectDeclaration(Parser *parser, Type *ty) {
+    Token *token = PeekToken(parser->lexer);
     Declaration *decl;
     Type *placeholder = calloc(1, sizeof(Type));
 
@@ -942,63 +952,63 @@ Declaration *DirectDeclaration(Lexer *lexer, Type *ty) {
         decl->token = token;
         decl->ty = placeholder;
         decl->Name = token->Literal;
-        NextToken(lexer);
+        NextToken(parser->lexer);
         break;
     case TOKEN_SEP_LPAREN:
-        decl = Declarator(lexer, placeholder);
-        ExpectToken(lexer, TOKEN_SEP_RPAREN);
+        decl = Declarator(parser, placeholder);
+        ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
         break;
     default:
-        Error(lexer, token, "bad direct-declarator");
+        Error(parser->lexer, token, "bad direct-declarator");
     }
 
     // Read the second half of type name (e.g. `[3][5]`).
-    *placeholder = *parseArray(lexer, ty);
+    *placeholder = *parseArray(parser, ty);
 
     // Read an initializer.
-    if (ConsumeToken(lexer, TOKEN_OP_ASSIGN)) {
-        decl->Init = parseAssign(lexer);
+    if (ConsumeToken(parser->lexer, TOKEN_OP_ASSIGN)) {
+        decl->Init = parseAssign(parser);
     }
     return decl;
 }
 
-Declaration *Declarator(Lexer *lexer, Type *ty) {
-    while (ConsumeToken(lexer, TOKEN_OP_MUL)) {
+Declaration *Declarator(Parser *parser, Type *ty) {
+    while (ConsumeToken(parser->lexer, TOKEN_OP_MUL)) {
         ty = PtrTo(ty);
     }
-    return DirectDeclaration(lexer, ty);
+    return DirectDeclaration(parser, ty);
 }
 
-Type *parseTypename(Lexer *lexer) {
-    Token *token = PeekToken(lexer);
+Type *parseTypename(Parser *parser) {
+    Token *token = PeekToken(parser->lexer);
     switch (token->Type) {
     case TOKEN_KW_VOID:
-        NextToken(lexer);
+        NextToken(parser->lexer);
         return &VoidType;
     case TOKEN_KW_INT:
-        NextToken(lexer);
+        NextToken(parser->lexer);
         return &IntType;
     case TOKEN_KW_CHAR:
-        NextToken(lexer);
+        NextToken(parser->lexer);
         return &CharType;
     default:
-        Error(lexer, token, "unsupported type.");
+        Error(parser->lexer, token, "unsupported type.");
     }
 }
 
-// Declaration *parseTypeDeclaration(Lexer *lexer) {
-//     // Type *ty = parseSpecifier(lexer);
-//     Type *ty = parseTypename(lexer);
-//     Declaration *decl = Declarator(lexer, ty);
-//     ExpectToken(lexer, TOKEN_SEP_SEMI);
+// Declaration *parseTypeDeclaration(Parser *parser) {
+//     // Type *ty = parseSpecifier(parser->lexer);
+//     Type *ty = parseTypename(parser);
+//     Declaration *decl = Declarator(parser, ty);
+//     ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
 //     return decl;
 // }
 
-Expression *parseDeclaration(Lexer *lexer) {
+Expression *parseDeclaration(Parser *parser) {
     // Type *ty = parseSpecifier();
-    Type *ty = parseTypename(lexer);
-    Declaration *decl = Declarator(lexer, ty);
-    Var *var = addLocalVar(decl->ty, decl->Name);
+    Type *ty = parseTypename(parser);
+    Declaration *decl = Declarator(parser, ty);
+    Var *var = addLocalVar(parser, decl->ty, decl->Name);
 
     if (!decl->Init) return NULL;
 
@@ -1012,30 +1022,30 @@ Expression *parseDeclaration(Lexer *lexer) {
     return exp;
 }
 
-Var *parseParamDeclaration(Lexer *lexer) {
-    // Type *ty = parseSpecifier(lexer);
-    Type *ty = parseTypename(lexer);
-    Declaration *decl = Declarator(lexer, ty);
+Var *parseParamDeclaration(Parser *parser) {
+    // Type *ty = parseSpecifier(parser->lexer);
+    Type *ty = parseTypename(parser);
+    Declaration *decl = Declarator(parser, ty);
     ty = decl->ty;
     if (ty->ty == ARRAY) ty = PtrTo(ty->ArrPtr);
-    return addLocalVar(ty, decl->Name);
+    return addLocalVar(parser, ty, decl->Name);
 }
 
-Expression *parseDeclOrExp(Lexer *lexer) {
-    Token *token = PeekToken(lexer);
+Expression *parseDeclOrExp(Parser *parser) {
+    Token *token = PeekToken(parser->lexer);
     if (IsTypename(token->Type)) {
-        return parseDeclaration(lexer);
+        return parseDeclaration(parser);
     } else {
-        return parseExp(lexer);
+        return parseExp(parser);
     }
 }
 
-// Type *parseSpecifer(Lexer *lexer) {
-//     Token *token = PeekToken(lexer);
+// Type *parseSpecifer(Parser *parser) {
+//     Token *token = PeekToken(parser->lexer);
 //     switch (token->Type) {
 //     // 'typedef' unsupported.
 //     // case TOKEN_IDENTIFIER:
-//     //     return getTypedef(env, token->Literal);
+//     //     return getTypedef(parser->env, token->Literal);
 //     case TOKEN_KW_VOID:
 //         return &VoidType;
 //     case TOKEN_KW_INT:
@@ -1044,21 +1054,21 @@ Expression *parseDeclOrExp(Lexer *lexer) {
 //         return &CharType;
 //     // 'typeof' unsupported.
 //     // case TOKEN_KW_TYPEOF:
-//     //     MustNextTokenOfType(lexer, TOKEN_SEP_LPAREN);
-//     //     Expression *exp = parseExpression(lexer);
-//     //     MustNextTokenOfType(lexer, TOKEN_SEP_RPAREN);
+//     //     MustNextTokenOfType(parser->lexer, TOKEN_SEP_LPAREN);
+//     //     Expression *exp = parseExpression(parser->lexer);
+//     //     MustNextTokenOfType(parser->lexer, TOKEN_SEP_RPAREN);
 //     //     return getTypeOfExp(exp);
 //     // 'struct' unsupported.
 //     // case TOKEN_KW_STRUCT:
-//     //     NextToken(lexer);
-//     //     token = PeekToken(lexer);
+//     //     NextToken(parser->lexer);
+//     //     token = PeekToken(parser->lexer);
 //     //     Type *ty = NULL;
 //     //     char *tag = NULL;
 
 //     //     if (token->Type == TOKEN_IDENTIFIER) {
 //     //         tag = token->Literal;
-//     //         ty = getTag(env, tag);
-//     //         token = NextToken(lexer);
+//     //         ty = getTag(parser->env, tag);
+//     //         token = NextToken(parser->lexer);
 //     //     }
 
 //     //     if (!ty) {
@@ -1068,256 +1078,264 @@ Expression *parseDeclOrExp(Lexer *lexer) {
 
 //     //     if (token->Type == TOKEN_SEP_LCURLY) {
 //     //         ty->Members = NewMap();
-//     //         while (!NextTokenOfType(lexer, TOKEN_SEP_RCURLY)) {
-//     //             Declaration *decl = parseTypeDeclaration(lexer);
+//     //         while (!NextTokenOfType(parser->lexer, TOKEN_SEP_RCURLY)) {
+//     //             Declaration *decl = parseTypeDeclaration(parser->lexer);
 //     //             MapPut(ty->Members, decl->Name, ty->ty);
 //     //         }
 //     //     }
 //     default:
-//         Error(lexer, "unsupported type.");
+//         Error(parser->lexer, "unsupported type.");
 //     }
 // }
 
-Statement *parseStmt(Lexer *lexer) {
-    Token *token = PeekToken(lexer);
+Statement *parseStmt(Parser *parser) {
+    Token *token = PeekToken(parser->lexer);
 
     switch (token->Type) {
     // unsupported yet.
     // case TOKEN_KW_TYPEDEF:
     case TOKEN_KW_IF: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         Statement *stmt = NewStmt(STMT_IF);
-        ExpectToken(lexer, TOKEN_SEP_LPAREN);
-        stmt->Cond = parseExp(lexer);
-        ExpectToken(lexer, TOKEN_SEP_RPAREN);
-        stmt->Body = parseStmt(lexer);
-        if (ConsumeToken(lexer, TOKEN_KW_ELSE)) {
-            stmt->Else = parseStmt(lexer);
+        ExpectToken(parser->lexer, TOKEN_SEP_LPAREN);
+        stmt->Cond = parseExp(parser);
+        ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
+        stmt->Body = parseStmt(parser);
+        if (ConsumeToken(parser->lexer, TOKEN_KW_ELSE)) {
+            stmt->Else = parseStmt(parser);
         }
         return stmt;
     }
     case TOKEN_KW_FOR: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         Statement *stmt = NewStmt(STMT_FOR);
-        env = newEnv(env);
-        VectorPush(breaks, stmt);
-        VectorPush(continues, stmt);
+        parser->env = newEnv(parser->env);
+        VectorPush(parser->Breaks, stmt);
+        VectorPush(parser->Continues, stmt);
 
-        ExpectToken(lexer, TOKEN_SEP_LPAREN);
+        ExpectToken(parser->lexer, TOKEN_SEP_LPAREN);
 
-        if (!ConsumeToken(lexer, TOKEN_SEP_SEMI)) {
-            stmt->Init = parseDeclOrExp(lexer);
-            ExpectToken(lexer, TOKEN_SEP_SEMI);
+        if (!ConsumeToken(parser->lexer, TOKEN_SEP_SEMI)) {
+            stmt->Init = parseDeclOrExp(parser);
+            ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
         }
 
-        if (!ConsumeToken(lexer, TOKEN_SEP_SEMI)) {
-            stmt->Cond = parseExp(lexer);
-            ExpectToken(lexer, TOKEN_SEP_SEMI);
+        if (!ConsumeToken(parser->lexer, TOKEN_SEP_SEMI)) {
+            stmt->Cond = parseExp(parser);
+            ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
         }
 
-        if (!ConsumeToken(lexer, TOKEN_SEP_RPAREN)) {
-            stmt->Step = parseExp(lexer);
-            ExpectToken(lexer, TOKEN_SEP_RPAREN);
+        if (!ConsumeToken(parser->lexer, TOKEN_SEP_RPAREN)) {
+            stmt->Step = parseExp(parser);
+            ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
         }
 
-        stmt->Body = parseStmt(lexer);
-        VectorPop(breaks);
-        VectorPop(continues);
-        env = env->prev;
+        stmt->Body = parseStmt(parser);
+        VectorPop(parser->Breaks);
+        VectorPop(parser->Continues);
+        parser->env = parser->env->prev;
         return stmt;
     }
     case TOKEN_KW_WHILE: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         Statement *stmt = NewStmt(STMT_FOR);
-        VectorPush(breaks, stmt);
-        VectorPush(continues, stmt);
+        VectorPush(parser->Breaks, stmt);
+        VectorPush(parser->Continues, stmt);
 
-        ExpectToken(lexer, TOKEN_SEP_LPAREN);
-        Expression *exp = parseExp(lexer);
+        ExpectToken(parser->lexer, TOKEN_SEP_LPAREN);
+        Expression *exp = parseExp(parser);
         stmt->Cond = exp;
-        ExpectToken(lexer, TOKEN_SEP_RPAREN);
+        ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
 
-        stmt->Body = parseStmt(lexer);
-        VectorPop(breaks);
-        VectorPop(continues);
+        stmt->Body = parseStmt(parser);
+        VectorPop(parser->Breaks);
+        VectorPop(parser->Continues);
         return stmt;
     }
     case TOKEN_KW_DO: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         Statement *stmt = NewStmt(STMT_DO_WHILE);
-        VectorPush(breaks, stmt);
-        VectorPush(continues, stmt);
+        VectorPush(parser->Breaks, stmt);
+        VectorPush(parser->Continues, stmt);
 
-        stmt->Body = parseStmt(lexer);
-        ExpectToken(lexer, TOKEN_KW_WHILE);
-        ExpectToken(lexer, TOKEN_SEP_LPAREN);
-        Expression *exp = parseExp(lexer);
+        stmt->Body = parseStmt(parser);
+        ExpectToken(parser->lexer, TOKEN_KW_WHILE);
+        ExpectToken(parser->lexer, TOKEN_SEP_LPAREN);
+        Expression *exp = parseExp(parser);
         stmt->Cond = exp;
-        ExpectToken(lexer, TOKEN_SEP_RPAREN);
-        ExpectToken(lexer, TOKEN_SEP_SEMI);
+        ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
+        ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
 
-        VectorPop(breaks);
-        VectorPop(continues);
+        VectorPop(parser->Breaks);
+        VectorPop(parser->Continues);
         return stmt;
     }
     case TOKEN_KW_SWITCH: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         Statement *stmt = NewStmt(STMT_SWITCH);
         stmt->Cases = NewVector();
-        VectorPush(breaks, stmt);
-        VectorPush(switches, stmt);
+        VectorPush(parser->Breaks, stmt);
+        VectorPush(parser->Switches, stmt);
 
-        ExpectToken(lexer, TOKEN_SEP_LPAREN);
-        Expression *exp = parseExp(lexer);
+        ExpectToken(parser->lexer, TOKEN_SEP_LPAREN);
+        Expression *exp = parseExp(parser);
         stmt->Cond = exp;
-        ExpectToken(lexer, TOKEN_SEP_RPAREN);
+        ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
 
-        stmt->Body = parseStmt(lexer);
-        VectorPop(breaks);
-        VectorPop(switches);
+        stmt->Body = parseStmt(parser);
+        VectorPop(parser->Breaks);
+        VectorPop(parser->Switches);
         return stmt;
     }
     case TOKEN_KW_CASE: {
-        NextToken(lexer);
-        if (VectorSize(switches) == 0) Error(lexer, token, "stray case.");
+        NextToken(parser->lexer);
+        if (VectorSize(parser->Switches) == 0) {
+            Error(parser->lexer, token, "stray case.");
+        }
         Statement *stmt = NewStmt(STMT_CASE);
         Expression *exp = NewExp(EXP_INT, NULL);
-        exp->Val = parseConstExp(lexer);
+        exp->Val = parseConstExp(parser);
         stmt->Cond = exp;
-        ExpectToken(lexer, TOKEN_SEP_COLON);
-        stmt->Body = parseStmt(lexer);
+        ExpectToken(parser->lexer, TOKEN_SEP_COLON);
+        stmt->Body = parseStmt(parser);
         
-        Statement *father = VectorLast(switches);
+        Statement *father = VectorLast(parser->Switches);
         VectorPush(father->Cases, stmt);
         return stmt;
     }
     case TOKEN_KW_DEFAULT: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         Statement *stmt = NewStmt(STMT_CASE);
         stmt->Default = 1;
-        ExpectToken(lexer, TOKEN_SEP_COLON);
-        stmt->Body = parseStmt(lexer);
+        ExpectToken(parser->lexer, TOKEN_SEP_COLON);
+        stmt->Body = parseStmt(parser);
         
-        Statement *father = VectorLast(switches);
+        Statement *father = VectorLast(parser->Switches);
         VectorPush(father->Cases, stmt);
         return stmt;
     }
     case TOKEN_KW_BREAK: {
-        NextToken(lexer);
-        if (VectorSize(breaks) == 0) Error(lexer, token, "stray break.");
+        NextToken(parser->lexer);
+        if (VectorSize(parser->Breaks) == 0) {
+            Error(parser->lexer, token, "stray break.");
+        }
         Statement *stmt = NewStmt(STMT_BREAK);
-        stmt->Body = VectorLast(breaks);
-        ExpectToken(lexer, TOKEN_SEP_SEMI);
+        stmt->Body = VectorLast(parser->Breaks);
+        ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
         return stmt;
     }
     case TOKEN_KW_CONTINUE: {
-        NextToken(lexer);
-        if (VectorSize(continues) == 0) Error(lexer, token, "stray continue.");
+        NextToken(parser->lexer);
+        if (VectorSize(parser->Continues) == 0) {
+            Error(parser->lexer, token, "stray continue.");
+        }
         Statement *stmt = NewStmt(STMT_CONTINUE);
-        stmt->Body = VectorLast(continues);
-        ExpectToken(lexer, TOKEN_SEP_SEMI);
+        stmt->Body = VectorLast(parser->Continues);
+        ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
         return stmt;
     }
     case TOKEN_KW_RETURN: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         Statement *stmt = NewStmt(STMT_RETURN);
-        stmt->Exp = parseExp(lexer);
-        ExpectToken(lexer, TOKEN_SEP_SEMI);
+        stmt->Exp = parseExp(parser);
+        ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
         return stmt;
     }
     case TOKEN_SEP_LCURLY: {
-        NextToken(lexer);
-        return parseCompoundStmt(lexer);
+        NextToken(parser->lexer);
+        return parseCompoundStmt(parser);
     }
     case TOKEN_SEP_SEMI: {
-        NextToken(lexer);
+        NextToken(parser->lexer);
         return &NullStmt;
     }
     default: {
-        Expression *exp = parseDeclOrExp(lexer);
+        Expression *exp = parseDeclOrExp(parser);
         if (!exp) {
-            ExpectToken(lexer, TOKEN_SEP_SEMI);
+            ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
             return &NullStmt;
         } else {
             Statement *stmt = NewExpStmt(token, exp);
-            ExpectToken(lexer, TOKEN_SEP_SEMI);
+            ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
             return stmt;
         }
     }
     }
 }
 
-Statement *parseCompoundStmt(Lexer *lexer) {
+Statement *parseCompoundStmt(Parser *parser) {
     Statement *stmt = NewStmt(STMT_COMP);
     stmt->Stmts = NewVector();
-    env = newEnv(env);
-    while (!ConsumeToken(lexer, TOKEN_SEP_RCURLY)) {
-        VectorPush(stmt->Stmts, parseStmt(lexer));
+    parser->env = newEnv(parser->env);
+    while (!ConsumeToken(parser->lexer, TOKEN_SEP_RCURLY)) {
+        VectorPush(stmt->Stmts, parseStmt(parser));
     }
-    env = env->prev;
+    parser->env = parser->env->prev;
     return stmt;
 }
 
-void parseTopLevel(Lexer *lexer) {
-    // Token *_typedef = NextTokenOfType(lexer, TOKEN_KW_TYPEDEF);
-    Token *Extern = ConsumeToken(lexer, TOKEN_KW_EXTERN) ;
+void parseTopLevel(Parser *parser) {
+    // Token *_typedef = NextTokenOfType(parser->lexer, TOKEN_KW_TYPEDEF);
+    Token *Extern = ConsumeToken(parser->lexer, TOKEN_KW_EXTERN) ;
 
-    // Type *ty = parseSpecifer(lexer);
-    Type *ty = parseTypename(lexer);
-    while (ConsumeToken(lexer, TOKEN_OP_MUL)) ty = PtrTo(ty);
-    Token *ident = ExpectToken(lexer, TOKEN_IDENTIFIER);
+    // Type *ty = parseSpecifer(parser->lexer);
+    Type *ty = parseTypename(parser);
+    while (ConsumeToken(parser->lexer, TOKEN_OP_MUL)) ty = PtrTo(ty);
+    Token *ident = ExpectToken(parser->lexer, TOKEN_IDENTIFIER);
 
     // Function
-    if (ConsumeToken(lexer, TOKEN_SEP_LPAREN)) {
-        lvars = NewVector();
-        breaks = NewVector();
-        continues = NewVector();
-        switches = NewVector();
-
-        Vector *v = NewVector();
-        while (!ConsumeToken(lexer, TOKEN_SEP_RPAREN)) {
-            if (VectorSize(v) > 0) ExpectToken(lexer, TOKEN_SEP_COMMA);
-            VectorPush(v, parseParamDeclaration(lexer));
-        }
-        Token *token = PeekToken(lexer);
-
+    if (ConsumeToken(parser->lexer, TOKEN_SEP_LPAREN)) {
         // define func type
         Type *func = calloc(1, sizeof(Type));
         func->ty = FUNC;
         func->Returning = ty;
 
-        addLocalVar(func, ident->Literal);
+        parser->LocalVars = NewVector();
+        parser->Breaks = NewVector();
+        parser->Continues = NewVector();
+        parser->Switches = NewVector();
 
-        if (ConsumeToken(lexer, TOKEN_SEP_SEMI)) return;
+        addLocalVar(parser, func, ident->Literal);
+        parser->env = newEnv(parser->env);
+
+        Vector *params = NewVector();
+        while (!ConsumeToken(parser->lexer, TOKEN_SEP_RPAREN)) {
+            if (VectorSize(params) > 0) {
+                ExpectToken(parser->lexer, TOKEN_SEP_COMMA);
+            }
+            VectorPush(params, parseParamDeclaration(parser));
+        }
+        Token *token = PeekToken(parser->lexer);
+
+        if (ConsumeToken(parser->lexer, TOKEN_SEP_SEMI)) return;
 
         // function body
-        ExpectToken(lexer, TOKEN_SEP_LCURLY);
-        Function *fn = calloc(1, sizeof(Function));
-        fn->Stmt = parseCompoundStmt(lexer);
+        ExpectToken(parser->lexer, TOKEN_SEP_LCURLY);
+        Function *fn = NewFunction();
+        fn->Stmt = parseCompoundStmt(parser);
         fn->Name = ident->Literal;
-        fn->Params = v;
-        fn->LocalVars = lvars;
+        fn->Params = params;
+        fn->LocalVars = parser->LocalVars;
         fn->bbs = NewVector();
-        VectorPush(program->Functions, fn);
+        VectorPush(parser->program->Functions, fn);
+
+        parser->env = parser->env->prev;
         return;
     }
 
-    ty = parseArray(lexer, ty);
-    ExpectToken(lexer, TOKEN_SEP_SEMI);
+    ty = parseArray(parser, ty);
+    ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
 
     // global variable
-    addGlobalVar(program, ty, ident->Literal, NULL, Extern != NULL);
+    addGlobalVar(parser, ty, ident->Literal, NULL, Extern != NULL);
 }
 
-Program *ParseProgram(Lexer *lexer) {
-    program = calloc(1, sizeof(Program));
-    program->GlobalVars = NewVector();
-    program->Functions = NewVector();
-    env = newEnv(NULL);
+Program *ParseProgram(Parser *parser) {
+    parser->program = NewProgram();
 
-    while (PeekToken(lexer)->Type != TOKEN_EOF) {
-        parseTopLevel(lexer);
+    while (PeekToken(parser->lexer)->Type != TOKEN_EOF) {
+        parseTopLevel(parser);
     }
-    program->macros = lexer->macros;
-    return program;
+    parser->program->macros = parser->lexer->macros;
+    return parser->program;
 }

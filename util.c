@@ -153,3 +153,10 @@ char *Format(char *fmt, ...) {
     va_end(ap);
     return strdup(buf);
 }
+
+char *StringClone(char *s, int len) {
+    char *tmp = malloc(len + 1);
+    memcpy(tmp, s, len);
+    tmp[len + 1] = '\0';
+    return tmp;
+}

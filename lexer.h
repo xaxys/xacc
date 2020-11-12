@@ -4,15 +4,13 @@
 #include "util.h"
 
 typedef struct Lexer {
-    int      peekPos;
+    char    *peekPos;
     char    *pos;
     char    *chunk;
     int      chunkSize;
     char    *chunkName;
-    char    *syntaxError;
     Token   *tokenCache;
     int      line;
-
     Map     *macros;
 } Lexer;
 

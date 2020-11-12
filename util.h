@@ -42,5 +42,6 @@ void StringBuilderAppendN(StringBuilder *sb, char *s, int len);
 char *StringBuilderToString(StringBuilder *sb);
 
 char *Format(char *fmt, ...);
+char *StringClone(char *s, int len);
 
 #endif

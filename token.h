@@ -1,12 +1,11 @@
 #ifndef TOKEN_H
 #define TOKEN_H
 
-typedef enum {
+typedef enum TokenType {
 	TOKEN_ILLEGAL,
 	TOKEN_EOF,
 	TOKEN_VARARG,
 	TOKEN_PREOP,	   // #
-	TOKEN_SEP_EOLN,	   // end-of-line
 	TOKEN_SEP_SEMI,	   // ;
 	TOKEN_SEP_COMMA,   // ,
 	TOKEN_SEP_DOT,	   // .
@@ -84,12 +83,10 @@ typedef enum {
 	TOKEN_CHAR,		   // char literal
 	TOKEN_NUMBER,	   // number literal
 	TOKEN_STRING,	   // string literal
-					   // TOKEN_OP_UNM       = TOKEN_OP_MINUS            // unary minus
-					   // TOKEN_OP_SUB       = TOKEN_OP_MINUS
 } TokenType;
 
 typedef struct Token {
-    int			Line;
+    int         Line;
     TokenType   Type; 
     char       *Literal;
 	char       *Original;

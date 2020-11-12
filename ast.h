@@ -20,14 +20,14 @@ func	:	type id '(' parm_types ')' '{' { type var_decl { ',' var_decl } ';' } { s
  	    |	void id '(' parm_types ')' '{' { type var_decl { ',' var_decl } ';' } { stmt } '}'
 stmt	:	if '(' expr ')' stmt [ else stmt ]
  	    |	while '(' expr ')' stmt
- 	    |	for '(' [ assg ] ';' [ expr ] ';' [ assg ] ')' stmt
+ 	    |	for '(' [ expr ] ';' [ expr ] ';' [ expr ] ')' stmt
  	    |	return [ expr ] ';'
- 	    |	assg ';'
+ 	    |	expr ';'
  	    |	id '(' [expr { ',' expr } ] ')' ';'
  	    |	'{' { stmt } '}'
  	    |	';'
-assg	:	id [ '[' expr ']' ] = expr
-expr	:	'–' expr
+expr	:	id [ '[' expr ']' ] = expr
+    	|	'–' expr
  	    |	'!' expr
  	    |	expr binop expr
  	    |	expr relop expr
@@ -70,7 +70,7 @@ enum CType {
     INT,
     PTR,
     ARRAY,
-    STRUCT,
+    // STRUCT,
     FUNC,
 };
 
@@ -171,7 +171,7 @@ struct Expression {
 
     Token *Op;
 
-    // LogicalOr
+    // CondExp
     Expression *Cond;
     // UnopExp(1) | BinopExp(1) | ParensExp(1) | TableAccessExp(prefix) | FuncCallExp(id)
     Expression *Exp1;
@@ -185,9 +185,6 @@ struct Expression {
     // FuncCallExp(id) | VarRef(1)
     Var *ID;
     char *Name;
-
-    // Assignment
-    int VarDef;
 
     // IntExp | CharExp
     int Val;
@@ -229,15 +226,13 @@ struct Statement {
     BB *Break;
     BB *Continue;
 
-    // Function definition
-    Vector *Params;
+    // // Function definition
+    // Vector *Params;
 
     // return [ expr ] ';'
     // id '(' [expr { ',' expr } ] ')' ';'
     // exp ';'
     Expression *Exp;
-
-    Declaration *Decl;
 
     // '{' { stmt } '}'
     Vector *Stmts;
@@ -258,11 +253,15 @@ struct Function {
     Vector *bbs;
 };
 
+Function *NewFunction();
+
 struct Program {
     Vector *GlobalVars;
     Vector *Functions;
     Map *macros;
 };
+
+Program *NewProgram();
 
 struct Reg {
     int VirtualNum; // virtual register number

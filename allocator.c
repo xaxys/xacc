@@ -47,8 +47,9 @@ void optimizeAssign(BB *bb) {
 }
 
 static void setLastUse(Reg *r, int ic) {
-    if (r && r->LastUse < ic)
+    if (r && r->LastUse < ic) {
         r->LastUse = ic;
+    }
 }
 
 static Vector *collectRegs(Function *fn) {
@@ -82,8 +83,8 @@ static Vector *collectRegs(Function *fn) {
             }
         }
 
-        for (int i = 0; i < bb->OutRegs->len; i++) {
-            Reg *r = bb->OutRegs->data[i];
+        for (int i = 0; i < VectorSize(bb->OutRegs); i++) {
+            Reg *r = VectorGet(bb->OutRegs, i);
             setLastUse(r, ic);
         }
     }

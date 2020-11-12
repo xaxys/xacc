@@ -4,8 +4,9 @@
 #include "ast.h"
 
 typedef struct IR IR;
+typedef enum IRType IRType;
 
-typedef enum {
+enum IRType {
     IR_ILLEGAL = -1,
     IR_ADD,
     IR_SUB,
@@ -28,14 +29,14 @@ typedef enum {
     IR_SHR,
     IR_MOD,
     IR_JMP,
-    IR_BR,
+    IR_TEST,
     IR_LOAD,
     IR_LOAD_SPILL,
     IR_STORE,
     IR_STORE_ARG,
     IR_STORE_SPILL,
     IR_NOP,
-} IRType;
+};
 
 struct IR {
     IRType ty;

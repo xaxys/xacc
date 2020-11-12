@@ -45,7 +45,7 @@ IR *emitIR(IRType ty, Reg *r0, Reg *r1, Reg *r2) {
 }
 
 IR *emitBR(Reg *r, BB *then, BB *els) {
-    IR *ir = NewIR(IR_BR);
+    IR *ir = NewIR(IR_TEST);
     ir->r2 = r;
     ir->bb1 = then;
     ir->bb2 = els;
@@ -233,8 +233,9 @@ Reg *genExp(Expression *exp) {
     }
     case EXP_FUNCCALL: {
         Reg *args[6];
-        for (int i = 0; i < VectorSize(exp->Exps); i++)
+        for (int i = 0; i < VectorSize(exp->Exps); i++) {
             args[i] = genExp(VectorGet(exp->Exps, i));
+        }
 
         IR *ir = NewIR(IR_CALL);
         ir->r0 = NewReg();
@@ -419,7 +420,7 @@ void genStmt(Statement *stmt) {
     }
 }
 
-static void genParam(Var *var, int i) {
+void genParam(Var *var, int i) {
     IR *ir = NewIR(IR_STORE_ARG);
     ir->ID = var;
     ir->imm = i;
@@ -470,8 +471,9 @@ void optimize(IR *ir) {
         if (var->AddressTaken || var->ty->ty != INT)
             return;
 
-        if (!var->Promoted)
+        if (!var->Promoted) {
             var->Promoted = NewReg();
+        }
 
         ir->ty = IR_NOP;
         ir->r0->Promoted = var->Promoted;

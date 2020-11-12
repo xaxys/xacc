@@ -57,6 +57,7 @@ Expression *NewVarref(Token *op, Var *var) {
     Expression *exp = NewExp(EXP_VARREF, op);
     exp->ctype = var->ty;
     exp->ID = var;
+    var->AddressTaken = 1;
 
     if (var->ty->ty == ARRAY) {
         Expression *tmp = NewExp(EXP_ADDR, op);
@@ -73,7 +74,7 @@ Expression *NewDeref(Token *op, Expression *exp1) {
     exp->ctype = exp1->ctype->Ptr;
     exp->Exp1 = exp1;
 
-    if (exp->ctype->ty == ARRAY) {
+    if (exp->ctype != NULL && exp->ctype->ty == ARRAY) {
         Expression *tmp = NewExp(EXP_ADDR, op);
         tmp->ctype = PtrTo(exp->ctype->ArrPtr);
         tmp->Exp1 = exp;
@@ -161,6 +162,18 @@ Type *NewFuncType(Type *returning) {
     return ty;
 }
 
+Function *NewFunction() {
+    Function *fn = calloc(1, sizeof(Function));
+    return fn;
+}
+
+Program *NewProgram() {
+    Program *program = calloc(1, sizeof(Program));
+    program->GlobalVars = NewVector();
+    program->Functions = NewVector();
+    return program;
+}
+
 int IsSameType(Type *x, Type *y) {
     if (x->ty != y->ty) return 0;
     switch (x->ty) {
@@ -168,7 +181,7 @@ int IsSameType(Type *x, Type *y) {
         return IsSameType(x->Ptr, y->Ptr);
     case ARRAY:
         return x->Size == y->Size && IsSameType(x->ArrPtr, y->ArrPtr);
-    case STRUCT:
+    // case STRUCT:
     case FUNC:
         return x == y;
     default:

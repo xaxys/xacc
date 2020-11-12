@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
+#include <assert.h>
 #include "lexer.h"
 
 static char escaped[256] = {
@@ -42,40 +43,90 @@ static void ErrorAt(Lexer *lexer, char *loc, char *fmt, ...) {
 
 Lexer *NewLexer(char *chunkName, char *chunk) {
     Lexer *lexer = calloc(1, sizeof(Lexer));
-    lexer->chunkName = malloc(strlen(chunkName) + 1);
-    memcpy(lexer->chunkName, chunkName, strlen(chunkName) + 1);
+    lexer->chunkName = strdup(chunkName);
     lexer->chunkSize = strlen(chunk);
-    lexer->chunk = malloc(lexer->chunkSize + 1);
-    memcpy(lexer->chunk, chunk, lexer->chunkSize + 1);
+    lexer->chunk = StringClone(chunk, lexer->chunkSize);
     lexer->line = 1;
     lexer->pos = lexer->chunk - 1;
-    lexer->peekPos = 0;
+    lexer->peekPos = lexer->chunk - 1;
 
     lexer->macros = NewMap();
     return lexer;
 }
 
-char *readCharN(Lexer *lexer, int n) {
-    if (lexer->pos + n < lexer->chunk + lexer->chunkSize) {
-        char *pos = lexer->pos;
-        lexer->pos += n;
-        lexer->peekPos = 0;
-        return pos + 1;
+// return the next char pos after skipped '\\\n'
+char *nextPos(Lexer *lexer, char *cur) {
+    if (cur < lexer->chunk + lexer->chunkSize) {
+        if (*cur != '\\') return cur;
+        if (cur + 1 < lexer->chunk + lexer->chunkSize) {
+            if (*(cur + 1) == '\n') {
+                lexer->line++;
+                return cur + 2;
+            }
+            else if (*(cur + 1) == '\r') {
+                if (cur + 2 < lexer->chunk + lexer->chunkSize) {
+                    if (*(cur + 2) == '\n') {
+                        lexer->line++;
+                        return cur + 3;
+                    }
+                    else return cur + 2;
+                } else return NULL;
+            } else return cur;
+        } else {
+            return NULL;
+        }
     } else {
         return NULL;
     }
 }
 
+void peekReset(Lexer *lexer) {
+    lexer->peekPos = lexer->pos;
+}
+
+char *peekChar(Lexer *lexer) {
+    char *pos = nextPos(lexer, lexer->peekPos + 1);
+    if (pos) {
+        lexer->peekPos = pos;
+        return lexer->peekPos;
+    } else {
+        return NULL;
+    }
+}
+
+char *mustPeekChar(Lexer *lexer) {
+    char *ch = peekChar(lexer);
+    if (ch) {
+        return ch;
+    } else {
+        ErrorAt(lexer, lexer->chunk + lexer->chunkSize, "unexpected end of file");
+    }
+}
+
 char *readChar(Lexer *lexer) {
-    return readCharN(lexer, 1);
+    char *pos = nextPos(lexer, lexer->pos + 1);
+    if (pos) {
+        lexer->pos = pos;
+        peekReset(lexer);
+        return lexer->pos;
+    } else {
+        return NULL;
+    }
+}
+
+char *readCharN(Lexer *lexer, int n) {
+    char *pos = readChar(lexer);
+    if (!pos) return NULL;
+    for (int i = 1; i < n; i++) {
+        if (!readChar(lexer)) return NULL;
+    }
+    return pos;
 }
 
 char *mustReadCharN(Lexer *lexer, int n) {
-    if (lexer->pos + n < lexer->chunk + lexer->chunkSize) {
-        char *pos = lexer->pos;
-        lexer->pos += n;
-        lexer->peekPos = 0;
-        return pos + 1;
+    char *pos = readCharN(lexer, n);
+    if (pos) {
+        return pos;
     } else {
         ErrorAt(lexer, lexer->chunk + lexer->chunkSize, "unexpected end of file");
     }
@@ -85,26 +136,23 @@ char *mustReadChar(Lexer *lexer) {
     return mustReadCharN(lexer, 1);
 }
 
-void peekReset(Lexer *lexer) {
-    lexer->peekPos = 0;
-}
-
-char *peekChar(Lexer *lexer) {
-    if (lexer->pos + lexer->peekPos < lexer->chunk + lexer->chunkSize) {
-        lexer->peekPos++;
-        return lexer->pos+lexer->peekPos;
-    } else {
-        return NULL;
-    }
-}
-
-char *mustPeekChar(Lexer *lexer) {
-    if (lexer->pos + lexer->peekPos < lexer->chunk + lexer->chunkSize) {
-        lexer->peekPos++;
-        return lexer->pos+lexer->peekPos;
-    } else {
-        ErrorAt(lexer, lexer->chunk + lexer->chunkSize, "unexpected end of file");
-    }
+char *readUntilChar(Lexer *lexer, char *tpl) {
+    //KMP
+    int tlen = strlen(tpl);
+    int *f = malloc(sizeof(int) * (tlen + 1));
+    f[0] = f[1] = 0;
+    for (int i = 1, j = 0; i < tlen; i++) {
+		while (j && tpl[i] != tpl[j]) j = f[j];
+		j += tpl[i] == tpl[j];
+		f[i + 1] = j;
+	}
+    char *ch = readChar(lexer);
+    for (int j = 0; ch != NULL; ch = readChar(lexer)) {
+		while (j && *ch != tpl[j]) j = f[j];
+		j += *ch == tpl[j];
+		if (j == tlen) return ch - tlen + 2;
+	}
+    return ch;
 }
 
 char *readCharConst(Lexer *lexer) {
@@ -136,11 +184,8 @@ char *readStringConst(Lexer *lexer) {
     int newLine = 0;
     char *ch = mustReadChar(lexer);
     while (*ch != '"') {
-        if (*ch != '\n' && *ch != '\r') newLine = 0;
-        if (*ch == '\\') newLine = 1;
-        else if (*ch == '\n') {
-            if (newLine == 1) lexer->line++;
-            else ErrorAt(lexer, ch, "unexpected end of line. unfinished string.");
+        if (*ch == '\n') {
+            ErrorAt(lexer, ch, "unexpected end of line. unfinished string.");
         }
         ch = mustReadChar(lexer);
     }
@@ -158,48 +203,71 @@ char *readStringConst(Lexer *lexer) {
     return StringBuilderToString(sb);
 }
 
+int isHexChar(char c) {
+    return isdigit(c) ||
+           (c >= 'A' && c <= 'F') ||
+           (c >= 'a' && c <= 'f');
+}
+
+int htoi(char *s) {
+    int num = 0;
+    for (int i = 0; i < strlen(s); i++) {
+        num *= 16;
+        if (isdigit(s[i])) {
+            num = num + s[i] - '0';
+        } else if (s[i] >= 'A' && s[i] <= 'F') {
+            num = num + s[i] + 10 - 'A';
+        } else if (s[i] >= 'a' && s[i] <= 'f') {
+            num = num + s[i] + 10 - 'a';
+        } else {
+            assert(0 && "not a hex");
+        }
+    }
+    return num;
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
 char *readNumberConst(Lexer *lexer) {
     char *startPos = mustReadChar(lexer);
     char *ch = peekChar(lexer);
     if (*startPos == '0') {
         if (ch != NULL && (*ch == 'x' || *ch == 'X')) {
+            // hex
             readChar(lexer);
             char *ch2 = peekChar(lexer);
-            while (ch2 != NULL &&
-                (isdigit(*ch2)
-                || (*ch2 >= 'A' && *ch2 <= 'F')
-                || (*ch2 >= 'a' && *ch2 <= 'f'))) {
+            while (ch2 != NULL && isHexChar(*ch2)) {
                 readChar(lexer), ch2 = peekChar(lexer);
             }
             peekReset(lexer);
 
-            // copy number string
-            char *tmp = malloc(ch2 - startPos + 1);
-            memcpy(tmp, startPos, ch2 - startPos);
-            tmp[ch2 - startPos + 1] = '\0';
-            return tmp;
+            char *tmp = StringClone(startPos, ch2 - startPos);
+            return (char *)(htoi(tmp+2));
         }
     }
 
-    int pointFlag = 0;
-    while (isdigit(*ch) || *ch == '.') {
-        if (*ch == '.') {
-            if (!pointFlag) {
-                pointFlag = 1;
-            } else {
-                ErrorAt(lexer, ch, "invalid number");
-            }
-        }
+    // float unsupported yet
+    // int pointFlag = 0;
+    // while (isdigit(*ch) || *ch == '.') {
+    //     float unsupported yet
+    //     if (*ch == '.') {
+    //         if (!pointFlag) {
+    //             pointFlag = 1;
+    //         } else {
+    //             ErrorAt(lexer, ch, "invalid number");
+    //         }
+    //     }
+    //     readChar(lexer), ch = peekChar(lexer);
+    // }
+    while (isdigit(*ch)) {
         readChar(lexer), ch = peekChar(lexer);
     }
     peekReset(lexer);
 
-    // copy number string
-    char *tmp = malloc(ch - startPos + 1);
-    memcpy(tmp, startPos, ch - startPos);
-    *(tmp + (ch - startPos + 1)) = '\0';
-    return tmp;
+    char *tmp = StringClone(startPos, ch - startPos);
+    return (char *)(atoi(tmp));
 }
+#pragma GCC diagnostic pop
 
 char *readIdentifier(Lexer *lexer) {
     char *startPos = mustReadChar(lexer);
@@ -209,21 +277,16 @@ char *readIdentifier(Lexer *lexer) {
     }
     peekReset(lexer);
 
-    // copy number string
-    char *tmp = malloc(ch - startPos + 1);
-    memcpy(tmp, startPos, ch - startPos);
-    tmp[ch - startPos + 1] = '\0';
-    return tmp;
+    return StringClone(startPos, ch - startPos);
 }
 
 Token *parseToken(Lexer *lexer) {
-    char *ch, *ch2, *ch3, *ch4;
+    char *ch, *ch2, *ch3, *p;
 
     // skip whitespace and comment
-    int flag = 1;
-    while (flag) {
+    for (;;) {
         ch = peekChar(lexer);
-        if (ch == NULL) break;
+        if (!ch) goto outSide;
         switch (*ch) {
         case '\n':
             lexer->line++;
@@ -233,45 +296,40 @@ Token *parseToken(Lexer *lexer) {
         case '\f':
         case '\v':
             readChar(lexer);
-            break;
+            goto nextLoop;
         case '/':
             ch2 = peekChar(lexer);
-            if (ch2 == NULL) break;
+            if (!ch2) goto outSide;
             switch (*ch2) {
             case '/':
                 // skip line
-                for (ch3 = readChar(lexer); ch3 != NULL && *ch3 != '\n'; ch3 = readChar(lexer));
-                lexer->line++;
-                continue;
-            case '*':
+                ch3 = readUntilChar(lexer, "\n");
+                if (ch3) lexer->line++;
+                goto nextLoop;
+            case '*': 
+                p = readCharN(lexer, 2);
                 // skip long comment
-                for (ch3 = mustReadChar(lexer); ; ch3 = mustReadChar(lexer)) {
-                    if (*ch3 == '*') {
-                        ch4 = mustPeekChar(lexer);
-                        if (*ch4 == '/') { // peek: */
-                            readChar(lexer);
-                            continue;
-                        }
-                    }
+                ch3 = readUntilChar(lexer, "*/");
+                if (!ch3) {
+                    ErrorAt(lexer, p, "unfinished long comment");
                 }
-                break;
+                goto nextLoop;
             }
-            flag = 0;
-            break;
         default:
-            flag = 0;
+            goto outSide;
         }
+        nextLoop:
         peekReset(lexer);
     }
+
+    outSide:
+    peekReset(lexer);
 
     // tokenize
     ch = peekChar(lexer);
     if (ch == NULL || *ch == '\0') return NewToken(lexer->line, TOKEN_EOF, "<EOF>");
 
     switch (*ch) {
-	// case '\n': // peek: \n
-	// 	readChar(lexer);
-	// 	return NewToken(lexer->line++, TOKEN_SEP_EOLN, "<end-of-line>");
 	case ';': // peek: ;
         return NewToken(lexer->line, TOKEN_SEP_SEMI, readChar(lexer));
     case ',': // peek: ,
@@ -524,14 +582,5 @@ Token *ConsumeToken(Lexer *lexer, TokenType type) {
         return NextToken(lexer);
     } else {
         return NULL;
-    }
-}
-
-Token *expectToken(Lexer *lexer, TokenType type) {
-    Token *token = ConsumeToken(lexer, type);
-    if (token == NULL) {
-        ErrorAt(lexer, PeekToken(lexer)->Original, "unexpected symbol.");
-    } else {
-        return token;
     }
 }

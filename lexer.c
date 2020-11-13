@@ -43,7 +43,7 @@ static void ErrorAt(Lexer *lexer, char *loc, char *fmt, ...) {
 
 Lexer *NewLexer(char *chunkName, char *chunk) {
     Lexer *lexer = calloc(1, sizeof(Lexer));
-    lexer->chunkName = strdup(chunkName);
+    lexer->chunkName = StringClone(chunkName, strlen(chunkName));
     lexer->chunkSize = strlen(chunk);
     lexer->chunk = StringClone(chunk, lexer->chunkSize);
     lexer->line = 1;

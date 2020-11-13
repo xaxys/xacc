@@ -153,7 +153,7 @@ char *Format(char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    return strdup(buf);
+    return StringClone(buf, strlen(buf));
 }
 
 char *StringClone(char *s, int len) {

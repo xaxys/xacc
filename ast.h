@@ -7,48 +7,60 @@
 // EBNF
 /*
 
-prog    :	{ dcl ';'  |  func }
-dcl	    :	type var_decl { ',' var_decl }
- 	    |	[ extern ] type id '(' parm_types ')' { ',' id '(' parm_types ')' }
- 	    |	[ extern ] void id '(' parm_types ')' { ',' id '(' parm_types ')' }
-var_decl:	id [ '[' intcon ']' ]
-type	:	char
- 	    |	int
-parm_types	:	void
- 	        |	type id [ '[' ']' ] { ',' type id [ '[' ']' ] }
-func	:	type id '(' parm_types ')' '{' { type var_decl { ',' var_decl } ';' } { stmt } '}'
- 	    |	void id '(' parm_types ')' '{' { type var_decl { ',' var_decl } ';' } { stmt } '}'
-stmt	:	if '(' expr ')' stmt [ else stmt ]
- 	    |	while '(' expr ')' stmt
- 	    |	for '(' [ expr ] ';' [ expr ] ';' [ expr ] ')' stmt
- 	    |	return [ expr ] ';'
- 	    |	expr ';'
- 	    |	id '(' [expr { ',' expr } ] ')' ';'
- 	    |	'{' { stmt } '}'
- 	    |	';'
-expr	:	id [ '[' expr ']' ] = expr
-    	|	'–' expr
- 	    |	'!' expr
- 	    |	expr binop expr
- 	    |	expr relop expr
- 	    |	expr logical_op expr
- 	    |	id [ '(' [expr { ',' expr } ] ')' | '[' expr ']' ]
- 	    |	'(' expr ')'
- 	    |	intcon
- 	    |	charcon
- 	    |	stringcon
-binop	:	+
- 	    |	–
- 	    |	*
- 	    |	/
-relop	:	==
- 	    |	!=
- 	    |	<=
- 	    |	<
- 	    |	>=
- 	    |	>
-logical_op	:	&&
- 	        |	||
+prog    :   { dcl ';'  |  func }
+dcl     :   lvar_decl
+        |   [ extern ] type id '(' parm_types ')' { ',' id '(' parm_types ')' }
+        |   [ extern ] void id '(' parm_types ')' { ',' id '(' parm_types ')' }
+lvar_decl:  type var_decl { ',' var_decl }
+var_decl:   id [ '[' intcon ']' ] [ '=' expr ]
+type    :   char
+        |   int
+        |   type '*'
+parm_types  :   void
+            |   type id [ '[' ']' ] { ',' type id [ '[' ']' ] }
+func    :   type id '(' parm_types ')' '{' { lvar_decl ';' } { stmt } '}'
+        |   void id '(' parm_types ')' '{' { lvar_decl ';' } { stmt } '}'
+stmt    :   if '(' expr ')' stmt [ else stmt ]
+        |   while '(' expr ')' stmt
+        |   for '(' [ expr | lvar_decl ] ';' [ expr ] ';' [ expr ] ')' stmt
+        |   switch '(' expr ')' '{' stmt '}'
+        |   case expr ':' stmt
+        |   return [ expr ] ';'
+        |   expr ';'
+        |   id '(' [expr { ',' expr } ] ')' ';'
+        |   '{' { stmt } '}'
+        |   ';'
+expr    :   id [ '[' expr ']' ] = expr
+        |   unop expr
+        |   expr binop expr
+        |   expr binop '=' expr
+        |   expr relop expr
+        |   expr logical_op expr
+        |   expr '?' expr ':' expr
+        |   id [ '(' [expr { ',' expr } ] ')' | '[' expr ']' ]
+        |   '(' expr ')'
+        |   intcon
+        |   charcon
+        |   stringcon
+unop    :   &
+        |   *
+        |   !
+        |   *
+        |   ~
+        |   -
+binop   :   +
+        |   –
+        |   *
+        |   /
+        |   %
+relop   :   ==
+        |   !=
+        |   <=
+        |   <
+        |   >=
+        |   >
+logical_op  :   &&
+            |   ||
 */
 typedef enum CType CType;
 typedef enum ExpType ExpType;

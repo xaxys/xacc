@@ -103,7 +103,7 @@ int chooseToSpill(Reg **used) {
 }
 
 // Allocate registers.
-static void scan(Vector *regs) {
+void scan(Vector *regs) {
     Reg **used = calloc(num_regs, sizeof(Reg *));
 
     for (int i = 0; i < regs->len; i++) {
@@ -136,7 +136,7 @@ static void scan(Vector *regs) {
     }
 }
 
-static void spillStore(Vector *v, IR *ir) {
+void spillStore(Vector *v, IR *ir) {
     Reg *r = ir->r0;
     if (!r || !r->Spill) {
         return;
@@ -149,7 +149,7 @@ static void spillStore(Vector *v, IR *ir) {
     VectorPush(v, ir2);
 }
 
-static void spillLoad(Vector *v, IR *ir, Reg *r) {
+void spillLoad(Vector *v, IR *ir, Reg *r) {
     if (!r || !r->Spill) {
         return;
     }
@@ -161,7 +161,7 @@ static void spillLoad(Vector *v, IR *ir, Reg *r) {
     VectorPush(v, ir2);
 }
 
-static void emitSpill(BB *bb) {
+void emitSpill(BB *bb) {
     Vector *v = NewVector();
 
     for (int i = 0; i < VectorSize(bb->IRs); i++) {

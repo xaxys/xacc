@@ -1,4 +1,5 @@
 #include "gen_x86.h"
+#include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <assert.h>
@@ -261,10 +262,26 @@ char *backslash_escape(char *s, int len) {
 }
 
 void emit_data(Var *ID) {
-    if (ID->Data) {
+    if (ID->StringData) {
         p(".data");
         p("%s:", ID->Name);
-        emit(".ascii \"%s\"", backslash_escape(ID->Data, ID->ty->Size));
+        emit(".ascii \"%s\"", backslash_escape(ID->StringData, ID->ty->Size));
+        return;
+    } else if (ID->IntData) {
+        char s[32];
+        sprintf(s, "%d", ID->IntData);
+        p(".data");
+        p("%s:", ID->Name);
+        switch (ID->ty->Size) {
+        case 1:
+            emit(".byte %s", s);
+            break;
+        case 4:
+            emit(".int %s", s);
+            break;
+        default:
+            assert(0 && "invalid size");
+        }
         return;
     }
 

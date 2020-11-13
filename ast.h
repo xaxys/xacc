@@ -149,7 +149,8 @@ struct Var {
 
     // Global variables are compiled to labels with optional
     // initialized data.
-    char *Data;
+    char *StringData;
+    int  IntData;
 
     // For optimization passes.
     int AddressTaken;

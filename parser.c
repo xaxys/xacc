@@ -100,12 +100,13 @@ Var *addLocalVar(Parser *parser, Type *ty, char *name) {
     return var;
 }
 
-Var *addGlobalVar(Parser *parser, Type *ty, char *name, char *data, int _extern) {
+Var *addGlobalVar(Parser *parser, Type *ty, char *name, char *data, int val, int _extern) {
     Var *var = calloc(1, sizeof(Var));
     var->ty = ty;
     var->Local = 0;
     var->Name = name;
-    var->Data = data;
+    var->StringData = data;
+    var->IntData = val;
     MapPut(parser->env->vars, name, var);
     if (!_extern) VectorPush(parser->program->GlobalVars, var);
     return var;
@@ -114,7 +115,7 @@ Var *addGlobalVar(Parser *parser, Type *ty, char *name, char *data, int _extern)
 Expression *NewStringExp(Parser *parser, char *s) {
     Type *ty = ArrayOf(&CharType, strlen(s)+1);
     char *name = Format(".L.str%d", nLabel++);
-    Var *var = addGlobalVar(parser, ty, name, s, 0);
+    Var *var = addGlobalVar(parser, ty, name, s, 0, 0);
     Expression *exp = NewVarref(NULL, var);
 
     if (exp->ctype->ty == ARRAY) {
@@ -917,8 +918,9 @@ Expression *parseExp(Parser *parser) {
 int parseConstExp(Parser *parser) {
     Token *token = PeekToken(parser->lexer);
     Expression *exp = parseExp(parser);
-    if (exp->ty != EXP_INT) 
+    if (!IsNumType(exp->ctype)) {
         Error(parser->lexer, token, "constant expression expected.");
+    }
     return exp->Val;
 }
 
@@ -1007,19 +1009,27 @@ Type *parseTypename(Parser *parser) {
 Expression *parseDeclaration(Parser *parser) {
     // Type *ty = parseSpecifier();
     Type *ty = parseTypename(parser);
-    Declaration *decl = Declarator(parser, ty);
-    Var *var = addLocalVar(parser, decl->ty, decl->Name);
+    Vector *v = NewVector();
+    do {
+        Declaration *decl = Declarator(parser, ty);
+        Var *var = addLocalVar(parser, decl->ty, decl->Name);
 
-    if (!decl->Init) return NULL;
+        if (decl->Init) {
+            // Convert `T var = init` to `T var; var = init`.
+            Expression *exp = NewExp(EXP_ASSIGN, NULL);
+            exp->Exp1 = NewVarref(NULL, var);
+            exp->Exp2 = decl->Init;
+            exp->ctype = exp->Exp1->ctype;
+            decl->Init = NULL;
+            VectorPush(v, exp);
+        }
+    } while (ConsumeToken(parser->lexer, TOKEN_SEP_COMMA));
 
-    // Convert `T var = init` to `T var; var = init`.
-    Expression *exp = NewExp(EXP_ASSIGN, NULL);
-    exp->Exp1 = NewVarref(NULL, var);
-    exp->Exp2 = decl->Init;
-    exp->ctype = exp->Exp1->ctype;
-    decl->Init = NULL;
-    
-    return exp;
+    if (VectorSize(v) == 0) {
+        return NULL;
+    } if (VectorSize(v) == 1) {
+        return VectorLast(v);
+    } else return NewStmtExp(NULL, v);
 }
 
 Var *parseParamDeclaration(Parser *parser) {
@@ -1275,16 +1285,39 @@ Statement *parseCompoundStmt(Parser *parser) {
 }
 
 void parseTopLevel(Parser *parser) {
-    // Token *_typedef = NextTokenOfType(parser->lexer, TOKEN_KW_TYPEDEF);
+    // Token *Typedef = NextTokenOfType(parser->lexer, TOKEN_KW_TYPEDEF);
     Token *Extern = ConsumeToken(parser->lexer, TOKEN_KW_EXTERN) ;
 
     // Type *ty = parseSpecifer(parser->lexer);
     Type *ty = parseTypename(parser);
-    while (ConsumeToken(parser->lexer, TOKEN_OP_MUL)) ty = PtrTo(ty);
-    Token *ident = ExpectToken(parser->lexer, TOKEN_IDENTIFIER);
-
-    // Function
-    if (ConsumeToken(parser->lexer, TOKEN_SEP_LPAREN)) {
+    Declaration *decl = Declarator(parser, ty);
+    if (!ConsumeToken(parser->lexer, TOKEN_SEP_LPAREN)) {
+        goto loop;
+        while (ConsumeToken(parser->lexer, TOKEN_SEP_COMMA)) {
+            decl = Declarator(parser, ty);
+            loop:
+            if (!decl->Init) {
+                addGlobalVar(parser, decl->ty, decl->Name, NULL, 0, Extern != NULL);
+                continue;
+            }
+            Expression *init = decl->Init;
+            if (IsNumType(init->ctype)) {
+                addGlobalVar(parser, decl->ty, decl->Name, NULL, decl->Init->Val, Extern != NULL);
+            } else if (init->ty == EXP_ADDR &&
+                       init->Exp1->ID == VectorLast(parser->program->GlobalVars)) {
+                if (init->ctype->ty != PTR || init->ctype->Ptr->ty != CHAR) {
+                    Error(parser->lexer, init->Op, "invalid initialize.");
+                }
+                Var *var = VectorLast(parser->program->GlobalVars);
+                var->Name = decl->Name;
+                VectorPop(parser->env->vars->keys);
+                VectorPush(parser->env->vars->keys, StringClone(decl->Name, strlen(decl->Name)));
+            } else {
+                Error(parser->lexer, init->Op, "invalid initialize.");
+            }
+        }
+        ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
+    } else { // Function
         // define func type
         Type *func = calloc(1, sizeof(Type));
         func->ty = FUNC;
@@ -1295,7 +1328,7 @@ void parseTopLevel(Parser *parser) {
         parser->Continues = NewVector();
         parser->Switches = NewVector();
 
-        addLocalVar(parser, func, ident->Literal);
+        addLocalVar(parser, func, decl->Name);
         parser->env = newEnv(parser->env);
 
         Vector *params = NewVector();
@@ -1313,7 +1346,7 @@ void parseTopLevel(Parser *parser) {
         ExpectToken(parser->lexer, TOKEN_SEP_LCURLY);
         Function *fn = NewFunction();
         fn->Stmt = parseCompoundStmt(parser);
-        fn->Name = ident->Literal;
+        fn->Name = decl->Name;
         fn->Params = params;
         fn->LocalVars = parser->LocalVars;
         fn->bbs = NewVector();
@@ -1322,12 +1355,6 @@ void parseTopLevel(Parser *parser) {
         parser->env = parser->env->prev;
         return;
     }
-
-    ty = parseArray(parser, ty);
-    ExpectToken(parser->lexer, TOKEN_SEP_SEMI);
-
-    // global variable
-    addGlobalVar(parser, ty, ident->Literal, NULL, Extern != NULL);
 }
 
 Program *ParseProgram(Parser *parser) {

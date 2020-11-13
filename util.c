@@ -75,19 +75,21 @@ Map *NewMap(void) {
 }
 
 void MapPut(Map *map, char *key, void *val) {
-    VectorPush(map->keys, key);
+    char *k = StringClone(key, strlen(key));
+    VectorPush(map->keys, k);
     VectorPush(map->vals, val);
 }
 
 void MapPutInt(Map *map, char *key, int val) {
-    VectorPush(map->keys, key);
+    char *k = StringClone(key, strlen(key));
+    VectorPush(map->keys, k);
     VectorPushInt(map->vals, val);
 }
 
 void *MapGet(Map *map, char *key) {
-    for (int i = map->keys->len - 1; i >= 0; i--) {
-        if (!strcmp(map->keys->data[i], key)) {
-            return map->vals->data[i];
+    for (int i = VectorSize(map->keys) - 1; i >= 0; i--) {
+        if (!strcmp(VectorGet(map->keys, i), key)) {
+            return VectorGet(map->vals, i);
         }
     }
     return NULL;

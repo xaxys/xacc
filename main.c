@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
         Genx86(program);
     } else {
         printf("Oops! No input files given.\n");
-		printf("xacc 0.3.0 2020.11.12 Copyright (C) 2020 xaxys.\n");
+		printf("xacc 0.3.1 2020.11.13 Copyright (C) 2020 xaxys.\n");
 		printf("usage: xacc [file]\n");
     }
 }

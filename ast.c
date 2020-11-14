@@ -162,6 +162,14 @@ Type *NewFuncType(Type *returning) {
     return ty;
 }
 
+Var *NewVar(Type *ty, char *name, int local) {
+    Var *var = calloc(1, sizeof(Var));
+    var->ty = ty;
+    var->Name = name;
+    var->Local = local;
+    return var;
+}
+
 Function *NewFunction() {
     Function *fn = calloc(1, sizeof(Function));
     return fn;

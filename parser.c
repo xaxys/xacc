@@ -91,31 +91,37 @@ Type *getTag(Env *env, char *name) {
 }
 
 Var *addLocalVar(Parser *parser, Type *ty, char *name) {
-    Var *var = calloc(1, sizeof(Var));
-    var->ty = ty;
-    var->Local = 1;
-    var->Name = name;
+    Var *var = NewVar(ty, name, 1);
     MapPut(parser->env->vars, name, var);
     VectorPush(parser->LocalVars, var);
     return var;
 }
 
-Var *addGlobalVar(Parser *parser, Type *ty, char *name, char *data, int val, int _extern) {
-    Var *var = calloc(1, sizeof(Var));
-    var->ty = ty;
-    var->Local = 0;
-    var->Name = name;
-    var->StringData = data;
-    var->IntData = val;
+Var *addGlobalString(Parser *parser, Type *ty, char *name, char *strdata, int _extern) {
+    Var *var = NewVar(ty, name, 0);
+    var->StringData = strdata;
     MapPut(parser->env->vars, name, var);
-    if (!_extern) VectorPush(parser->program->GlobalVars, var);
+    if (!_extern) {
+        VectorPush(parser->program->GlobalVars, var);
+    }
+    return var;
+}
+
+Var *addGlobalVar(Parser *parser, Type *ty, char *name, char *data, int size, int _extern) {
+    Var *var = NewVar(ty, name, 0);
+    var->RawData = data;
+    var->RawDataSize = size;
+    MapPut(parser->env->vars, name, var);
+    if (!_extern) {
+        VectorPush(parser->program->GlobalVars, var);
+    }
     return var;
 }
 
 Expression *NewStringExp(Parser *parser, char *s) {
     Type *ty = ArrayOf(&CharType, strlen(s)+1);
     char *name = Format(".L.str%d", nLabel++);
-    Var *var = addGlobalVar(parser, ty, name, s, 0, 0);
+    Var *var = addGlobalString(parser, ty, name, s, 0);
     Expression *exp = NewVarref(NULL, var);
 
     if (exp->ctype->ty == ARRAY) {
@@ -243,8 +249,8 @@ Expression *parsePrimary(Parser *parser) {
 Expression *NewPostIncrease(Parser *parser, Token *token, Expression *exp, int imm) {
     Vector *v = NewVector();
 
-    Var *var1 = addLocalVar(parser, PtrTo(exp->ctype), "tmp1");
-    Var *var2 = addLocalVar(parser, exp->ctype, "tmp2");
+    Var *var1 = addLocalVar(parser, PtrTo(exp->ctype), "");
+    Var *var2 = addLocalVar(parser, exp->ctype, "");
 
     Expression *exp1 = NewExp(EXP_ASSIGN, token);
     exp1->Exp1 = NewVarref(token, var1);
@@ -841,7 +847,7 @@ Expression *parseConditional(Parser *parser) {
 // `({ T *z = &x; *z = *z op y; })`.
 Expression *NewAssignEqual(Parser *parser, Token *op, Expression *exp1, Expression *exp2) {
     Vector *v = NewVector();
-    Var *var = addLocalVar(parser, PtrTo(exp1->ctype), "tmp");
+    Var *var = addLocalVar(parser, PtrTo(exp1->ctype), "");
 
     // T *z = &x
     Expression *tmp1 = NewExp(EXP_ASSIGN, op);
@@ -1286,7 +1292,7 @@ Statement *parseCompoundStmt(Parser *parser) {
 
 void parseTopLevel(Parser *parser) {
     // Token *Typedef = NextTokenOfType(parser->lexer, TOKEN_KW_TYPEDEF);
-    Token *Extern = ConsumeToken(parser->lexer, TOKEN_KW_EXTERN) ;
+    Token *Extern = ConsumeToken(parser->lexer, TOKEN_KW_EXTERN);
 
     // Type *ty = parseSpecifer(parser->lexer);
     Type *ty = parseTypename(parser);
@@ -1302,7 +1308,23 @@ void parseTopLevel(Parser *parser) {
             }
             Expression *init = decl->Init;
             if (IsNumType(init->ctype)) {
-                addGlobalVar(parser, decl->ty, decl->Name, NULL, decl->Init->Val, Extern != NULL);
+                void *rawdata;
+                int rawdatasize;
+                switch (init->ctype->ty) {
+                case CHAR: {
+                    rawdatasize = 1;
+                    char *p = malloc(rawdatasize);
+                    *p = (char)init->Val;
+                    rawdata = p;
+                }
+                case INT: {
+                    rawdatasize = 4;
+                    int *p = malloc(rawdatasize);
+                    *p = (int)init->Val;
+                    rawdata = p;
+                }
+                }
+                addGlobalVar(parser, decl->ty, decl->Name, rawdata, rawdatasize, Extern != NULL);
             } else if (init->ty == EXP_ADDR &&
                        init->Exp1->ID == VectorLast(parser->program->GlobalVars)) {
                 if (init->ctype->ty != PTR || init->ctype->Ptr->ty != CHAR) {

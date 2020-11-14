@@ -7,6 +7,5 @@
 
 extern int nLabel;
 void GenProgram(Program *program);
-void Optimize(Program *program);
 
 #endif

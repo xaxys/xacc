@@ -1,5 +1,5 @@
 CFLAGS=-std=c11 -g -static
-SRCS=$(filter-out helloworld.c, $(wildcard *.c))
+SRCS=$(wildcard *.c)
 OBJS=$(SRCS:.c=.o)
 
 xacc: $(SRCS)

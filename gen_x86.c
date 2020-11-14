@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <ctype.h>
+#define min(x,y) ((x) < (y) ? (x) : (y))
 
 // This pass generates x86-64 assembly from IR.
 
@@ -75,7 +76,7 @@ void emit_ir(IR *ir, char *ret) {
 
     switch (ir->ty) {
     case IR_IMM:
-        emit("mov %s, %d", regs[r0], ir->imm);
+        emit("mov %s, %u", regs[r0], ir->imm);
         break;
     case IR_BPREL:
         emit("lea %s, [rbp%d]", regs[r0], ir->ID->Offset);
@@ -132,8 +133,9 @@ void emit_ir(IR *ir, char *ret) {
         emit("shr %s, cl", regs[r0]);
         break;
     case IR_JMP:
-        if (ir->bbArg)
+        if (ir->bbArg) {
             emit("mov %s, %s", regs[ir->bb1->Param->RealNum], regs[ir->bbArg->RealNum]);
+        }
         emit("jmp .L%d", ir->bb1->Label);
         break;
     case IR_TEST:
@@ -143,8 +145,9 @@ void emit_ir(IR *ir, char *ret) {
         break;
     case IR_LOAD:
         emit("mov %s, [%s]", reg(r0, ir->Size), regs[r2]);
-        if (ir->Size == 1)
+        if (ir->Size == 1) {
             emit("movzb %s, %s", regs[r0], regs8[r0]);
+        }
         break;
     case IR_LOAD_SPILL:
         emit("mov %s, [rbp%d]", regs[r0], ir->ID->Offset);
@@ -267,20 +270,19 @@ void emit_data(Var *ID) {
         p("%s:", ID->Name);
         emit(".ascii \"%s\"", backslash_escape(ID->StringData, ID->ty->Size));
         return;
-    } else if (ID->IntData) {
-        char s[32];
-        sprintf(s, "%d", ID->IntData);
+    } else if (ID->RawData) {
         p(".data");
         p("%s:", ID->Name);
-        switch (ID->ty->Size) {
-        case 1:
-            emit(".byte %s", s);
-            break;
-        case 4:
-            emit(".int %s", s);
-            break;
-        default:
-            assert(0 && "invalid size");
+        int size = ID->ty->Size;
+        int i = 0;
+        while (i < size && i < ID->RawDataSize) {
+            unsigned char *c = ID->RawData + i;
+            emit(".byte %d", *c);
+            i++;
+        }
+        while (i < size) {
+            emit(".byte 0");
+            i++;
         }
         return;
     }

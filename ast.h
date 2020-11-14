@@ -162,12 +162,15 @@ struct Var {
     // Global variables are compiled to labels with optional
     // initialized data.
     char *StringData;
-    int  IntData;
+    char *RawData;
+    int RawDataSize;
 
     // For optimization passes.
     int AddressTaken;
     Reg *Promoted;
 };
+
+Var *NewVar(Type *ty, char *name, int local);
 
 struct Declaration {
     Token *token;

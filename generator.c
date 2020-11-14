@@ -428,32 +428,6 @@ void genParam(Var *var, int i) {
     var->AddressTaken = 1;
 }
 
-void GenProgram(Program *program) {
-    for (int i = 0; i < VectorSize(program->Functions); i++) {
-        fn = VectorGet(program->Functions, i);
-
-        // Add an empty entry BB to make later analysis easy.
-        out = NewBB();
-        BB *bb = NewBB();
-        emitJmp(bb);
-        out = bb;
-
-        // Emit IR.
-        Vector *params = fn->Params;
-        for (int i = 0; i < VectorSize(params); i++) {
-            genParam(VectorGet(params, i), i);
-        }
-
-        genStmt(fn->Stmt);
-
-        // Make it always ends with a return to make later analysis easy.
-        NewIR(IR_RETURN)->r2 = emitImm(0);
-
-        // Later passes shouldn't need the AST, so make it explicit.
-        fn->Stmt = NULL;
-    }
-}
-
 // Rewrite
 //
 //  BPREL r1, <offset>
@@ -465,7 +439,7 @@ void GenProgram(Program *program) {
 //  NOP
 //  r4 = r2
 //  r3 = r4
-void optimize(IR *ir) {
+void optimizeGen(IR *ir) {
     if (ir->ty == IR_BPREL) {
         Var *var = ir->ID;
         if (var->AddressTaken || var->ty->ty != INT)
@@ -498,13 +472,34 @@ void optimize(IR *ir) {
     }
 }
 
-void Optimize(Program *program) {
+void GenProgram(Program *program) {
     for (int i = 0; i < VectorSize(program->Functions); i++) {
-        Function *fn = VectorGet(program->Functions, i);
+        fn = VectorGet(program->Functions, i);
+
+        // Add an empty entry BB to make later analysis easy.
+        out = NewBB();
+        BB *bb = NewBB();
+        emitJmp(bb);
+        out = bb;
+
+        // Emit IR.
+        Vector *params = fn->Params;
+        for (int i = 0; i < VectorSize(params); i++) {
+            genParam(VectorGet(params, i), i);
+        }
+
+        genStmt(fn->Stmt);
+
+        // Make it always ends with a return to make later analysis easy.
+        NewIR(IR_RETURN)->r2 = emitImm(0);
+
+        // Later passes shouldn't need the AST, so make it explicit.
+        fn->Stmt = NULL;
+
         for (int i = 0; i < VectorSize(fn->bbs); i++) {
             BB *bb = VectorGet(fn->bbs, i);
             for (int i = 0; i < VectorSize(bb->IRs); i++) {
-                optimize(VectorGet(bb->IRs, i));
+                optimizeGen(VectorGet(bb->IRs, i));
             }
         }
     }

@@ -46,13 +46,13 @@ void optimizeAssign(BB *bb) {
     bb->IRs = v;
 }
 
-static void setLastUse(Reg *r, int ic) {
+void setLastUse(Reg *r, int ic) {
     if (r && r->LastUse < ic) {
         r->LastUse = ic;
     }
 }
 
-static Vector *collectRegs(Function *fn) {
+Vector *collectRegs(Function *fn) {
     Vector *v = NewVector();
     int ic = 1; // instruction counter
 
@@ -106,8 +106,8 @@ int chooseToSpill(Reg **used) {
 void scan(Vector *regs) {
     Reg **used = calloc(num_regs, sizeof(Reg *));
 
-    for (int i = 0; i < regs->len; i++) {
-        Reg *r = regs->data[i];
+    for (int i = 0; i < VectorSize(regs); i++) {
+        Reg *r = VectorGet(regs, i);
 
         // Find an unused slot.
         int found = 0;
@@ -176,6 +176,21 @@ void emitSpill(BB *bb) {
     bb->IRs = v;
 }
 
+// Rewrite
+//
+//  r1 = r1
+//
+// to
+//
+//  NOP
+void optimizeAlloc(IR *ir) {
+    if (ir->ty == IR_MOV) {
+        if (ir->r0->RealNum == ir->r2->RealNum)
+        ir->ty = IR_NOP;
+        return;
+    }
+}
+
 void Allocate(Program *prog) {
     for (int i = 0; i < VectorSize(prog->Functions); i++) {
         Function *fn = VectorGet(prog->Functions, i);
@@ -205,10 +220,14 @@ void Allocate(Program *prog) {
             VectorPush(fn->LocalVars, ID);
         }
 
-        // Convert accesses to spilled registers to loads and stores.
-        for (int i = 0; i < fn->bbs->len; i++) {
-            BB *bb = fn->bbs->data[i];
+        for (int i = 0; i < VectorSize(fn->bbs); i++) {
+            BB *bb = VectorGet(fn->bbs, i);
+            // Convert accesses to spilled registers to loads and stores.
             emitSpill(bb);
+
+            for (int i = 0; i < VectorSize(bb->IRs); i++) {
+                optimizeAlloc(VectorGet(bb->IRs, i));
+            }
         }
     }
 }

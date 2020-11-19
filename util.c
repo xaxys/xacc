@@ -157,7 +157,7 @@ char *Format(char *fmt, ...) {
 }
 
 char *StringClone(char *s, int len) {
-    char *tmp = malloc(len + 1);
+    char *tmp = calloc(1, len + 1);
     memcpy(tmp, s, len);
     tmp[len] = '\0';
     return tmp;

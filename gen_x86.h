@@ -1,7 +1,6 @@
 #ifndef GEN_X86_H
 #define GEN_X86_H
 
-#include "ast.h"
 #include "ir.h"
 
 extern char *regs[];

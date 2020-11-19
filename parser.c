@@ -240,6 +240,20 @@ Expression *parsePrimary(Parser *parser) {
         }
         return parseLocalVar(parser, token);
     }
+
+    if (token->Type == TOKEN_KW_SIZEOF) {
+        NextToken(parser->lexer);
+        ExpectToken(parser->lexer, TOKEN_SEP_LPAREN);
+        Token *t = NextToken(parser->lexer);
+        if (t->Type == TOKEN_IDENTIFIER) {
+            Var *var = getVar(parser->env, t->Literal);
+            if (!var) Error(parser->lexer, t, "undefined variable.");
+            ExpectToken(parser->lexer, TOKEN_SEP_RPAREN);
+            return NewIntExp(var->ty->Size, t);
+        } else {
+            Error(parser->lexer, t, "unsupported yet.");
+        }
+    }
  
     Error(parser->lexer, token, "primary expression expected.");
 }
@@ -1332,6 +1346,8 @@ void parseTopLevel(Parser *parser) {
                 }
                 Var *var = VectorLast(parser->program->GlobalVars);
                 var->Name = decl->Name;
+                var->ty = decl->ty;
+                var->StringData = StringClone(decl->Name, var->ty->Size);
                 VectorPop(parser->env->vars->keys);
                 VectorPush(parser->env->vars->keys, StringClone(decl->Name, strlen(decl->Name)));
             } else {

@@ -1,9 +1,10 @@
-CFLAGS=-std=c11 -g -static
+CFLAGS=-std=c11 -g
+LDFLAGS=-static
 SRCS=$(wildcard *.c)
 OBJS=$(SRCS:.c=.o)
 
-xacc: $(SRCS)
-	cc $(SRCS) -o $@ $(CFLAGS)
+xacc: $(OBJS)
+	cc $(OBJS) -o $@ $(LDFLAGS)
 
 test:
 	./test.sh

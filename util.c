@@ -46,15 +46,32 @@ int VectorGetInt(Vector *v, int i) {
     return *((int *)(v->data[i]));
 }
 
+void VectorSet(Vector *v, int i, void *elem) {
+    assert(i < v->len);
+    v->data[i] = elem;
+}
+
+void VectorReplace(Vector *v, int i, void *elem) {
+    assert(i < v->len);
+    free(v->data[i]);
+    v->data[i] = elem;
+}
+
+void VectorSetInt(Vector *v, int i, int val) {
+    assert(i < v->len);
+    *(int *)(v->data[i]) = val; 
+}
+
 void *VectorLast(Vector *v) {
     assert(v->len);
     return v->data[v->len - 1];
 }
 
 int VectorContain(Vector *v, void *elem) {
-    for (int i = 0; i < v->len; i++)
-    if (v->data[i] == elem) return 1;
-    else return 0;
+    for (int i = 0; i < v->len; i++) {
+        if (v->data[i] == elem) return 1;
+    }
+    return 0;
 }
 
 int VectorUnion(Vector *v, void *elem) {
@@ -75,15 +92,45 @@ Map *NewMap(void) {
 }
 
 void MapPut(Map *map, char *key, void *val) {
+    int index = MapIndex(map, key);
+    if (index != -1) {
+        VectorSet(map->vals, index, val);
+        return;
+    }
+    char *k = StringClone(key, strlen(key));
+    VectorPush(map->keys, k);
+    VectorPush(map->vals, val);
+}
+
+void MapReplace(Map *map, char *key, void *val) {
+    int index = MapIndex(map, key);
+    if (index != -1) {
+        VectorReplace(map->vals, index, val);
+        return;
+    }
     char *k = StringClone(key, strlen(key));
     VectorPush(map->keys, k);
     VectorPush(map->vals, val);
 }
 
 void MapPutInt(Map *map, char *key, int val) {
+    int index = MapIndex(map, key);
+    if (index != -1) {
+        VectorSetInt(map->vals, index, val);
+        return;
+    }
     char *k = StringClone(key, strlen(key));
     VectorPush(map->keys, k);
     VectorPushInt(map->vals, val);
+}
+
+int MapIndex(Map *map, char *key) {
+    for (int i = VectorSize(map->keys) - 1; i >= 0; i--) {
+        if (!strcmp(VectorGet(map->keys, i), key)) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 void *MapGet(Map *map, char *key) {
@@ -104,6 +151,22 @@ int MapGetInt(Map *map, char *key, int _default) {
     return _default;
 }
 
+int MapContain(Map *map, char *key) {
+    return MapIndex(map, key) != -1;
+}
+
+int MapSize(Map *map) {
+    return VectorSize(map->keys);
+}
+
+Vector *MapKeys(Map *map) {
+    return map->keys;
+}
+
+Vector *MapVals(Map *map) {
+    return map->vals;
+}
+
 StringBuilder *NewStringBuilder() {
     StringBuilder *sb = malloc(sizeof(StringBuilder));
     sb->data = malloc(8);
@@ -121,7 +184,7 @@ void stringBuilderGrow(StringBuilder *sb, int len) {
         if (sb->capacity <= 1024) {
             sb->capacity *= 2;
         } else {
-            sb->capacity * 1.25;
+            sb->capacity *= 1.25;
         }
     }
     sb->data = realloc(sb->data, sb->capacity);

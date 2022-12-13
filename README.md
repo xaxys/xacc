@@ -17,7 +17,7 @@ WARNING! Please expect breaking changes and unstable APIs. Most of them are curr
   * Finished Analyzer, Allocator and Gen_x86.
 * 2020/11/08 Updated to xacc v0.2.3.
   * Fixed multidimensional array parse.
-  *  Add keyword `default` in switch statement.
+  * Add keyword `default` in switch statement.
   * Added var declaration in initialize of `for` statement.
 * 2020/11/12 Released xacc v0.3.0.
   * Fixed `AddressTaken` of `EXP_VARREF`
@@ -30,6 +30,8 @@ WARNING! Please expect breaking changes and unstable APIs. Most of them are curr
   * Fixed useless `mov` after allocating real register numbers.
   * Fixed `StringClone` bugs.
   * Fixed generation of `IR_IMM` with a negative number.
+* 2022/12/14 Draft
+  * Fixed Misbehavior of `Vector` grow on `1024` elements and more.
 
 ### EBNF
 
